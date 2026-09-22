@@ -22,13 +22,12 @@ export const CATEGORY_DEPARTMENTS = ISSUE_CATEGORIES.reduce((map, category) => {
 }, {})
 
 export const ISSUE_STATUSES = [
-  { id: 'reported', label: 'Reported (New)' },
+  { id: 'reported', label: 'Reported' },
   { id: 'assigned', label: 'Assigned to Contractor' },
   { id: 'accepted', label: 'Accepted by Contractor' },
   { id: 'repair_in_progress', label: 'Repair In Progress' },
-  { id: 'ai_verification', label: 'AI Verifying' },
   { id: 'needs_review', label: 'Needs Admin Review' },
-  { id: 'resolved', label: 'Resolved (Auto-Verified)' },
+  { id: 'resolved', label: 'Resolved' },
   { id: 'completed', label: 'Completed' },
   { id: 'suspicious', label: 'Suspicious Evidence' },
   { id: 'rejected', label: 'Rejected' },

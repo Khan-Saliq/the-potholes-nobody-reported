@@ -1,42 +1,134 @@
 import { API_URL, apiFetch, fixImageUrl } from './api'
 import type { Issue, IssueCategory, IssueStatus, ValidationResult, User, ContractorReportResponse } from '../types'
 
+function downloadBlob(blob: Blob, filename: string) {
+  const url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  window.URL.revokeObjectURL(url)
+  document.body.removeChild(a)
+}
+
 export async function exportIssues(filters: Record<string, any>): Promise<void> {
   const token = localStorage.getItem('civicpulse_token')
-  let response = await fetch(`${API_URL}/issues/export`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(filters),
-  })
-  
-  if (!response.ok) {
-    response = await fetch(`${API_URL}/admin/issues/export`, {
+
+  // 1. Try fast backend export with 4s timeout
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 4000)
+
+    const response = await fetch(`${API_URL}/issues/export`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
       body: JSON.stringify(filters),
+      signal: controller.signal,
     })
+    clearTimeout(timeoutId)
+
+    if (response.ok) {
+      const blob = await response.blob()
+      downloadBlob(blob, `Municipal_Issues_Export_${new Date().toISOString().split('T')[0]}.xlsx`)
+      return
+    }
+  } catch (err) {
+    console.warn('Backend Excel export endpoint unavailable or timed out, generating client-side report:', err)
   }
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({ error: 'Export failed' }))
-    throw new Error(errorData.error || `Failed to export issues (${response.status})`)
-  }
-  
-  const blob = await response.blob()
-  const url = window.URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `Municipal_Issues_Export_${new Date().toISOString().split('T')[0]}.xlsx`
-  document.body.appendChild(a)
-  a.click()
-  window.URL.revokeObjectURL(url)
-  document.body.removeChild(a)
+  // 2. Client-Side Fallback Generation via ExcelJS (Guaranteed Instant Download)
+  const ExcelJS = (await import('exceljs')).default
+  const issues = await getAllIssues(filters)
+
+  const workbook = new ExcelJS.Workbook()
+  workbook.creator = 'CivicPulse Municipal Platform'
+  workbook.created = new Date()
+
+  const sheet = workbook.addWorksheet('Issues Register')
+
+  sheet.mergeCells('A1:L1')
+  const titleCell = sheet.getCell('A1')
+  titleCell.value = 'MUNICIPAL POTHOLE & ROAD COMPLAINTS REGISTER'
+  titleCell.font = { name: 'Calibri', size: 16, bold: true, color: { argb: 'FFFFFF' } }
+  titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '0284C7' } }
+  titleCell.alignment = { vertical: 'middle', horizontal: 'center' }
+  sheet.getRow(1).height = 35
+
+  sheet.mergeCells('A2:L2')
+  const subTitle = sheet.getCell('A2')
+  subTitle.value = `Total Issues Exported: ${issues.length} | Generated: ${new Date().toLocaleString()}`
+  subTitle.font = { name: 'Calibri', size: 11, italic: true, color: { argb: '475569' } }
+  subTitle.alignment = { vertical: 'middle', horizontal: 'center' }
+  sheet.getRow(2).height = 25
+
+  sheet.getRow(3).height = 12
+
+  const headers = [
+    'Complaint ID',
+    'Title',
+    'Category',
+    'Severity',
+    'Status',
+    'Location Address',
+    'Reporter',
+    'Contractor',
+    'Department',
+    'Priority Score',
+    'Reported Date',
+    'Completed Date',
+  ]
+
+  const headerRow = sheet.getRow(4)
+  headers.forEach((h, idx) => {
+    const cell = headerRow.getCell(idx + 1)
+    cell.value = h
+    cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFF' } }
+    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '0F172A' } }
+    cell.alignment = { vertical: 'middle', horizontal: 'center' }
+  })
+  headerRow.height = 25
+
+  issues.forEach((issue, idx) => {
+    const row = sheet.getRow(5 + idx)
+    const issueId = issue.id || (issue as any)._id || ''
+    row.values = [
+      issue.complaintId || `PT-${String(issueId).slice(-8)}`,
+      issue.title,
+      issue.category || 'Potholes & Road Damage',
+      issue.severity,
+      (issue.status || 'reported').replace(/_/g, ' ').toUpperCase(),
+      issue.location?.address || '—',
+      issue.reporterName || '—',
+      issue.contractorName || issue.assignedTo || '—',
+      issue.responsibleDepartment || 'Roads & Infrastructure',
+      issue.priorityScore || 0,
+      issue.createdAt ? new Date(issue.createdAt).toLocaleString() : '—',
+      issue.status === 'completed' || issue.status === 'resolved' ? (issue.updatedAt ? new Date(issue.updatedAt).toLocaleString() : '—') : '—',
+    ]
+  })
+
+  sheet.columns = [
+    { width: 18 },
+    { width: 30 },
+    { width: 24 },
+    { width: 10 },
+    { width: 22 },
+    { width: 38 },
+    { width: 22 },
+    { width: 24 },
+    { width: 26 },
+    { width: 14 },
+    { width: 22 },
+    { width: 22 },
+  ]
+
+  const buffer = await workbook.xlsx.writeBuffer()
+  const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  downloadBlob(blob, `Municipal_Issues_Export_${new Date().toISOString().split('T')[0]}.xlsx`)
 }
 
 export async function getAllIssues(params?: Record<string, string>): Promise<Issue[]> {
