@@ -127,7 +127,18 @@ export function AdminIssues() {
         <div className="mt-6 flex flex-wrap gap-3">
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as IssueStatus | 'all')} className="input-dark w-auto text-sm">
             <option value="all">All Statuses</option>
-            {(config?.statuses ?? []).map((s) => (
+            {(config?.statuses?.length ? config.statuses : [
+              { id: 'reported', label: 'Reported (New)' },
+              { id: 'assigned', label: 'Assigned to Contractor' },
+              { id: 'accepted', label: 'Accepted by Contractor' },
+              { id: 'repair_in_progress', label: 'Repair In Progress' },
+              { id: 'ai_verification', label: 'AI Verifying' },
+              { id: 'needs_review', label: 'Needs Admin Review' },
+              { id: 'resolved', label: 'Resolved (Auto-Verified)' },
+              { id: 'completed', label: 'Completed' },
+              { id: 'suspicious', label: 'Suspicious Evidence' },
+              { id: 'rejected', label: 'Rejected' },
+            ]).map((s) => (
               <option key={s.id} value={s.id}>{s.label}</option>
             ))}
           </select>
