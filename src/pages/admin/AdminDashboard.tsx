@@ -8,79 +8,23 @@ import { StatCard } from '../../components/ui/StatCard'
 import { useIssues } from '../../context/IssueContext'
 import { useConfig } from '../../context/ConfigContext'
 import { getAllIssues, getStats } from '../../services/issueService'
-import { clearAllUploadsAndIssues } from '../../services/uploadService'
 import { useAuth } from '../../context/AuthContext'
-import { useToast } from '../../context/ToastContext'
-import { useConfirm } from '../../context/ConfirmContext'
 import type { Issue } from '../../types'
 
 type DashboardTab = 'new_issues' | 'in_progress' | 'exceptions' | 'completed'
 
 export function AdminDashboard() {
-  const { stats, loading, error, refreshIssues } = useIssues()
+  const { stats, loading, error } = useIssues()
   const { user } = useAuth()
   const { config } = useConfig()
-  const { toast } = useToast()
-  const { confirmAction } = useConfirm()
   const [issuesList, setIssuesList] = useState<Issue[]>([])
   const [activeTab, setActiveTab] = useState<DashboardTab>('new_issues')
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all')
   const [departmentStats, setDepartmentStats] = useState<any>(stats)
-  const [clearing, setClearing] = useState(false)
-  const [clearMessage, setClearMessage] = useState<string | null>(null)
-  const [clearError, setClearError] = useState<string | null>(null)
-
-  const handleSeedDemo = () => {
-    confirmAction({
-      title: 'Seed Hackathon Demo Scenarios',
-      description: 'Seed 5 pre-packaged Demo Pothole Complaints (A to E) with photos and GPS coordinates for testing?',
-      confirmText: 'Seed Demo Data',
-      variant: 'primary',
-      onConfirm: async () => {
-        try {
-          const { seedDemoScenarios } = await import('../../services/issueService')
-          const res = await seedDemoScenarios()
-          await refreshIssues()
-          toast.success('Demo Data Seeded', res.message)
-          window.location.reload()
-        } catch (err: any) {
-          toast.error('Failed to Seed Data', err.message || 'Failed to seed demo scenarios')
-        }
-      },
-    })
-  }
-
-  const handleClearAll = () => {
-    setClearMessage(null)
-    setClearError(null)
-    confirmAction({
-      title: 'Purge All Database Records',
-      description: 'Delete all issues, upload records, and related DB info? This action cannot be undone.',
-      confirmText: 'Delete Everything',
-      variant: 'danger',
-      onConfirm: async () => {
-        setClearing(true)
-        try {
-          await clearAllUploadsAndIssues()
-          await refreshIssues()
-          setClearMessage('All issues and uploads were cleared successfully.')
-          toast.success('Database Cleared', 'All issues and uploads were cleared successfully.')
-        } catch (err: any) {
-          setClearError(err.message)
-          toast.error('Clear Failed', err.message)
-        } finally {
-          setClearing(false)
-        }
-      },
-    })
-  }
-
   const departments = useMemo(() => {
     const items = config?.categories.map((category) => category.department ?? '') ?? []
     return Array.from(new Set(items.filter(Boolean)))
   }, [config])
-
-
 
   useEffect(() => {
     const fetchIssues = async () => {
@@ -145,33 +89,14 @@ export function AdminDashboard() {
   return (
     <Layout>
       <AnimatedPage>
-        <div className="mb-8 flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-100">
-              Municipal Admin <span className="text-gradient">Dashboard</span>
-            </h1>
-            <p className="text-slate-400">Automatic AI evidence verification is active. Focus on actionable issues and exception reviews.</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={handleSeedDemo}
-              className="btn-gradient rounded-xl px-4 py-2 text-sm font-bold shadow-lg"
-            >
-              🌱 Seed Hackathon Demo Scenarios (Complaints A–E)
-            </button>
-            <button
-              onClick={handleClearAll}
-              disabled={clearing}
-              className="btn-ghost rounded-xl border border-white/10 bg-white/5 px-4 py-2 text-sm text-rose-300 hover:bg-rose-500/10 disabled:opacity-50"
-            >
-              {clearing ? 'Clearing...' : 'Clear All Issues'}
-            </button>
-          </div>
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold text-slate-100">
+            Municipal Admin <span className="text-gradient">Dashboard</span>
+          </h1>
+          <p className="text-slate-400">Automatic AI evidence verification is active. Focus on actionable issues and exception reviews.</p>
         </div>
 
         {error && <div className="mb-4 text-red-300">{error}</div>}
-        {clearError && <div className="mb-4 text-red-300">{clearError}</div>}
-        {clearMessage && <div className="mb-4 text-emerald-300">{clearMessage}</div>}
 
         {loading ? (
           <p className="text-slate-400">Loading dashboard...</p>

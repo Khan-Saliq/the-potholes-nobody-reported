@@ -91,6 +91,7 @@ export function AdminIssues() {
     try {
       const filters = {
         status: statusFilter !== 'all' ? statusFilter : undefined,
+        department: selectedDepartment !== 'all' ? selectedDepartment : undefined,
         startDate: startDate || undefined,
         endDate: endDate || undefined,
         month: filterMonth || undefined,
@@ -156,7 +157,7 @@ export function AdminIssues() {
           {/* Export Button */}
           <button
             onClick={handleExport}
-            disabled={exporting || issues.length === 0}
+            disabled={exporting}
             className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 px-3 py-2 text-sm font-medium text-white transition-all hover:shadow-lg hover:shadow-emerald-500/30 disabled:opacity-50"
           >
             <Download className="h-4 w-4" />

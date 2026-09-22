@@ -1079,46 +1079,75 @@ router.post('/:id/submit-repair', authRequired, requireContractor, async (req, r
 
     issue.verificationResult = verification
 
-    if (verification.overallResult !== 'VERIFIED') {
-      issue.status = 'repair_in_progress'
+    // Case 1: AI Verification PASSED cleanly -> Auto-move to RESOLVED state without requiring Admin intervention
+    if (verification.overallResult === 'VERIFIED') {
+      issue.status = 'resolved'
+      issue.repairStatus = 'verified'
+      issue.timeline = issue.timeline || []
+      issue.timeline.push({
+        action: 'Repair Automatically Verified & Complaint Resolved',
+        timestamp: new Date(),
+        performedBy: 'System AI Verification Engine',
+        role: 'system',
+        previousStatus: prevStatus,
+        newStatus: 'resolved',
+        details: `Multi-signal AI analysis confirmed location, background landmarks, camera perspective, and completed asphalt repair patch. Complaint marked RESOLVED automatically.`,
+      })
+
+      await notifyIssueParticipants(
+        issue,
+        `Repair Resolved & Verified: ${issue.title}`,
+        `The pothole repair for "${issue.title}" has been automatically verified by AI and marked RESOLVED.`,
+        'status_update'
+      )
+
       issue.lastActionAt = new Date()
       await issue.save()
 
-      const failReason = (verification.reasons && verification.reasons.length > 0)
-        ? verification.reasons.join(' ')
-        : 'AI computer vision check failed: Submitted repair photo or GPS location does not match original pothole.'
-
-      return res.status(400).json({
-        error: `Upload a valid proof: ${failReason}`,
-        verification,
-      })
+      return res.json(formatIssue(issue))
     }
 
-    issue.status = 'completed'
-    issue.repairStatus = 'verified'
-    issue.timeline = issue.timeline || []
-    issue.timeline.push({
-      action: 'Repair Automatically Verified & Complaint Closed',
-      timestamp: new Date(),
-      performedBy: 'System AI',
-      role: 'system',
-      previousStatus: prevStatus,
-      newStatus: 'completed',
-      details: `Multi-signal AI analysis confirmed location, background landmarks, camera perspective, and pothole repair patch. Complaint closed automatically.`,
-    })
+    // Case 2: AI Verification INCONCLUSIVE / Confused -> Queue for Manual Admin Review
+    if (verification.overallResult === 'NEEDS_ADMIN_REVIEW') {
+      issue.status = 'needs_review'
+      issue.repairStatus = 'needs_admin_review'
+      issue.timeline = issue.timeline || []
+      issue.timeline.push({
+        action: 'AI Inconclusive - Queued for Admin Review',
+        timestamp: new Date(),
+        performedBy: 'System AI Verification Engine',
+        role: 'system',
+        previousStatus: prevStatus,
+        newStatus: 'needs_review',
+        details: `AI analysis was inconclusive or detected ambiguous image/GPS signals. Queued for manual Admin inspection.`,
+      })
 
-    // Notify citizen & participants of automatic completion
-    await notifyIssueParticipants(
-      issue,
-      `Repair Completed & Verified: ${issue.title}`,
-      `The pothole repair for "${issue.title}" has been automatically verified by AI and marked COMPLETED.`,
-      'status_update'
-    )
+      await notifyIssueParticipants(
+        issue,
+        `Repair Under Admin Review: ${issue.title}`,
+        `Contractor submitted repair evidence for "${issue.title}". AI verification was inconclusive, queued for Admin manual review.`,
+        'status_update'
+      )
 
+      issue.lastActionAt = new Date()
+      await issue.save()
+
+      return res.json(formatIssue(issue))
+    }
+
+    // Case 3: Invalid / Suspicious Proof -> Rejection
+    issue.status = 'repair_in_progress'
     issue.lastActionAt = new Date()
     await issue.save()
 
-    res.json(formatIssue(issue))
+    const failReason = (verification.reasons && verification.reasons.length > 0)
+      ? verification.reasons.join(' ')
+      : 'AI check failed: Submitted repair photo or GPS location does not match original pothole.'
+
+    return res.status(400).json({
+      error: `Upload a valid proof: ${failReason}`,
+      verification,
+    })
   } catch (err) {
     console.error('Error submitting repair evidence:', err)
     res.status(500).json({ error: err.message })
@@ -1510,13 +1539,29 @@ router.delete('/:id', authRequired, requireAnyAdmin, async (req, res) => {
 // POST /api/issues/export - Export issues register to Excel (.xlsx)
 router.post('/export', authRequired, requireAnyAdmin, async (req, res) => {
   try {
-    const { status, category, department } = req.body || {}
+    const { status, category, department, startDate, endDate, month, year } = req.body || {}
     const filter = {}
     if (status && status !== 'all') filter.status = status
     if (category && category !== 'all') filter.category = category
     if (department && department !== 'all') filter.responsibleDepartment = department
 
-    const issues = await Issue.find(filter).sort({ createdAt: -1 })
+    if (startDate || endDate) {
+      filter.createdAt = {}
+      if (startDate) filter.createdAt.$gte = new Date(startDate)
+      if (endDate) {
+        const end = new Date(endDate)
+        end.setHours(23, 59, 59, 999)
+        filter.createdAt.$lte = end
+      }
+    } else if (month && year) {
+      const m = parseInt(month, 10) - 1
+      const y = parseInt(year, 10)
+      const start = new Date(y, m, 1)
+      const end = new Date(y, m + 1, 0, 23, 59, 59, 999)
+      filter.createdAt = { $gte: start, $lte: end }
+    }
+
+    const issues = await Issue.find(filter).sort({ createdAt: -1 }).lean()
 
     const workbook = new ExcelJS.Workbook()
     workbook.creator = 'CivicPulse Municipal Platform'
