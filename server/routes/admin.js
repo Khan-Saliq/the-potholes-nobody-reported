@@ -1056,26 +1056,32 @@ router.post('/seed-demo-scenarios', authRequired, requireAdmin, async (req, res)
 // POST /api/admin/issues/export - Export issues register to Excel (.xlsx)
 router.post('/issues/export', authRequired, requireAdmin, async (req, res) => {
   try {
+    const isValid = (v) => v != null && v !== '' && v !== 'undefined' && v !== 'null' && v !== 'all'
     const { status, category, department, startDate, endDate, month, year } = req.body || {}
     const filter = {}
-    if (status && status !== 'all') filter.status = status
-    if (category && category !== 'all') filter.category = category
-    if (department && department !== 'all') filter.responsibleDepartment = department
+    if (isValid(status)) filter.status = status
+    if (isValid(category)) filter.category = category
+    if (isValid(department)) filter.responsibleDepartment = department
 
-    if (startDate || endDate) {
+    const hasStart = isValid(startDate) && !isNaN(new Date(startDate).getTime())
+    const hasEnd = isValid(endDate) && !isNaN(new Date(endDate).getTime())
+
+    if (hasStart || hasEnd) {
       filter.createdAt = {}
-      if (startDate) filter.createdAt.$gte = new Date(startDate)
-      if (endDate) {
+      if (hasStart) filter.createdAt.$gte = new Date(startDate)
+      if (hasEnd) {
         const end = new Date(endDate)
         end.setHours(23, 59, 59, 999)
         filter.createdAt.$lte = end
       }
-    } else if (month && year) {
-      const m = parseInt(month, 10) - 1
-      const y = parseInt(year, 10)
-      const start = new Date(y, m, 1)
-      const end = new Date(y, m + 1, 0, 23, 59, 59, 999)
-      filter.createdAt = { $gte: start, $lte: end }
+    } else {
+      const m = isValid(month) ? parseInt(month, 10) : NaN
+      const y = isValid(year) ? parseInt(year, 10) : NaN
+      if (!isNaN(m) && !isNaN(y)) {
+        const start = new Date(y, m - 1, 1)
+        const end = new Date(y, m, 0, 23, 59, 59, 999)
+        filter.createdAt = { $gte: start, $lte: end }
+      }
     }
 
     const issues = await Issue.find(filter).sort({ createdAt: -1 }).lean()

@@ -197,38 +197,58 @@ async function checkForRecurringPothole(lat, lng) {
   return { isRecurring: false }
 }
 
+function isValidParam(val) {
+  return val != null && val !== '' && val !== 'undefined' && val !== 'null' && val !== 'all'
+}
+
 function buildQuery(params) {
   const query = {}
-  if (params.status && params.status !== 'all') query.status = params.status
-  if (params.category && params.category !== 'all') query.category = params.category
+  if (isValidParam(params.status)) {
+    if (params.status === 'resolved') {
+      query.status = { $in: ['resolved', 'completed'] }
+    } else if (params.status === 'completed') {
+      query.status = { $in: ['completed', 'resolved'] }
+    } else {
+      query.status = params.status
+    }
+  }
+  if (isValidParam(params.category)) query.category = params.category
   if (params.excludeResolved === 'true') query.status = { $ne: 'resolved' }
-  if (params.validation) query.validationResult = params.validation
-  
+  if (isValidParam(params.validation)) query.validationResult = params.validation
+  if (isValidParam(params.department)) query.responsibleDepartment = params.department
+
   // Date filtering
-  if (params.startDate || params.endDate) {
+  const hasStart = isValidParam(params.startDate) && !isNaN(new Date(params.startDate).getTime())
+  const hasEnd = isValidParam(params.endDate) && !isNaN(new Date(params.endDate).getTime())
+
+  if (hasStart || hasEnd) {
     query.createdAt = {}
-    if (params.startDate) {
+    if (hasStart) {
       query.createdAt.$gte = new Date(params.startDate)
     }
-    if (params.endDate) {
-      // End of the selected day
+    if (hasEnd) {
       const end = new Date(params.endDate)
       end.setHours(23, 59, 59, 999)
       query.createdAt.$lte = end
     }
   }
-  
-  // Specific day/month/year filtering
-  if (params.day) {
-    query.$expr = { $eq: [{ $dayOfMonth: '$createdAt' }, parseInt(params.day)] }
+
+  // Specific day/month/year filtering with NaN safety
+  const dayNum = isValidParam(params.day) ? parseInt(params.day, 10) : NaN
+  const monthNum = isValidParam(params.month) ? parseInt(params.month, 10) : NaN
+  const yearNum = isValidParam(params.year) ? parseInt(params.year, 10) : NaN
+
+  const exprConditions = []
+  if (!isNaN(dayNum)) exprConditions.push({ $eq: [{ $dayOfMonth: '$createdAt' }, dayNum] })
+  if (!isNaN(monthNum)) exprConditions.push({ $eq: [{ $month: '$createdAt' }, monthNum] })
+  if (!isNaN(yearNum)) exprConditions.push({ $eq: [{ $year: '$createdAt' }, yearNum] })
+
+  if (exprConditions.length === 1) {
+    query.$expr = exprConditions[0]
+  } else if (exprConditions.length > 1) {
+    query.$expr = { $and: exprConditions }
   }
-  if (params.month) {
-    query.$expr = { $eq: [{ $month: '$createdAt' }, parseInt(params.month)] }
-  }
-  if (params.year) {
-    query.$expr = { $eq: [{ $year: '$createdAt' }, parseInt(params.year)] }
-  }
-  
+
   return query
 }
 
@@ -1539,28 +1559,7 @@ router.delete('/:id', authRequired, requireAnyAdmin, async (req, res) => {
 // POST /api/issues/export - Export issues register to Excel (.xlsx)
 router.post('/export', authRequired, requireAnyAdmin, async (req, res) => {
   try {
-    const { status, category, department, startDate, endDate, month, year } = req.body || {}
-    const filter = {}
-    if (status && status !== 'all') filter.status = status
-    if (category && category !== 'all') filter.category = category
-    if (department && department !== 'all') filter.responsibleDepartment = department
-
-    if (startDate || endDate) {
-      filter.createdAt = {}
-      if (startDate) filter.createdAt.$gte = new Date(startDate)
-      if (endDate) {
-        const end = new Date(endDate)
-        end.setHours(23, 59, 59, 999)
-        filter.createdAt.$lte = end
-      }
-    } else if (month && year) {
-      const m = parseInt(month, 10) - 1
-      const y = parseInt(year, 10)
-      const start = new Date(y, m, 1)
-      const end = new Date(y, m + 1, 0, 23, 59, 59, 999)
-      filter.createdAt = { $gte: start, $lte: end }
-    }
-
+    const filter = buildQuery(req.body || {})
     const issues = await Issue.find(filter).sort({ createdAt: -1 }).lean()
 
     const workbook = new ExcelJS.Workbook()
