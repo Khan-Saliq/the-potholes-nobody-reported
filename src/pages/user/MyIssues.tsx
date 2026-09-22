@@ -4,6 +4,7 @@ import { AnimatedPage } from '../../components/ui/AnimatedPage'
 import { useAuth } from '../../context/AuthContext'
 import { getIssuesByReporter } from '../../services/issueService'
 import { getCachedIssuesLocally, cacheIssuesLocally } from '../../services/offlineStorage'
+import { fixImageUrl } from '../../services/api'
 import type { Issue } from '../../types'
 
 export function MyIssues() {
@@ -158,22 +159,34 @@ export function MyIssues() {
                   </div>
                 </div>
 
-                {/* Photo Proof Display if Repair Completed */}
-                {issue.afterImage && (
-                  <div className="rounded-xl bg-black/40 p-4 border border-emerald-500/20 space-y-2">
-                    <span className="text-xs font-bold text-emerald-300 block">Verified Repair Proof (BEFORE vs AFTER)</span>
-                    <div className="grid gap-3 md:grid-cols-2">
+                {/* Citizen Uploaded Proof & Repair Photo Display */}
+                <div className="rounded-xl bg-black/40 p-4 border border-white/10 space-y-2">
+                  <span className="text-xs font-bold text-slate-300 block">Report & Repair Photo Evidence</span>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {issue.imageUrl ? (
                       <div>
-                        <span className="text-[0.65rem] text-slate-400 block mb-1">Your Original Report</span>
-                        <img src={issue.imageUrl} alt="Pothole Before" className="h-32 w-full object-cover rounded-lg border border-white/10" />
+                        <span className="text-[0.65rem] text-cyan-300 font-semibold block mb-1">Your Uploaded Report Proof</span>
+                        <img src={fixImageUrl(issue.imageUrl)} alt="Citizen Reported Pothole" className="h-36 w-full object-cover rounded-lg border border-cyan-500/30 ring-1 ring-cyan-500/20" />
                       </div>
+                    ) : (
+                      <div className="flex h-36 flex-col items-center justify-center rounded-lg border border-dashed border-slate-700 bg-slate-900/50 p-4 text-center">
+                        <span className="text-xs text-slate-500">No Image Attached</span>
+                      </div>
+                    )}
+
+                    {issue.afterImage ? (
                       <div>
-                        <span className="text-[0.65rem] text-emerald-400 block mb-1">Contractor Repaired Surface</span>
-                        <img src={issue.afterImage} alt="Repaired Road After" className="h-32 w-full object-cover rounded-lg border border-emerald-500/30" />
+                        <span className="text-[0.65rem] text-emerald-400 font-semibold block mb-1">Contractor Repaired Surface</span>
+                        <img src={fixImageUrl(issue.afterImage)} alt="Repaired Road Surface" className="h-36 w-full object-cover rounded-lg border border-emerald-500/30 ring-1 ring-emerald-500/20" />
                       </div>
-                    </div>
+                    ) : (
+                      <div className="flex h-36 flex-col items-center justify-center rounded-lg border border-dashed border-slate-700/60 bg-slate-900/30 p-4 text-center">
+                        <span className="text-xs text-slate-400 font-medium">Repair In Progress</span>
+                        <span className="text-[0.65rem] text-slate-500 mt-1">Contractor repair proof will appear here upon completion</span>
+                      </div>
+                    )}
                   </div>
-                )}
+                </div>
               </div>
             ))}
           </div>

@@ -3,7 +3,7 @@ import type { Issue, IssueCategory, IssueStatus, ValidationResult, User, Contrac
 
 export async function exportIssues(filters: Record<string, any>): Promise<void> {
   const token = localStorage.getItem('civicpulse_token')
-  const response = await fetch(`${API_URL}/issues/export`, {
+  let response = await fetch(`${API_URL}/issues/export`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -12,6 +12,17 @@ export async function exportIssues(filters: Record<string, any>): Promise<void> 
     body: JSON.stringify(filters),
   })
   
+  if (!response.ok) {
+    response = await fetch(`${API_URL}/admin/issues/export`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(filters),
+    })
+  }
+
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({ error: 'Export failed' }))
     throw new Error(errorData.error || `Failed to export issues (${response.status})`)
