@@ -96,15 +96,7 @@ export function AdminIssues() {
         month: filterMonth || undefined,
         year: filterYear || undefined,
       }
-      const blob = await exportIssues(filters)
-      const url = window.URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `issues-report-${Date.now()}.xlsx`
-      document.body.appendChild(link)
-      link.click()
-      document.body.removeChild(link)
-      window.URL.revokeObjectURL(url)
+      await exportIssues(filters)
       toast.success('Issues Exported', 'Issues report downloaded successfully.')
     } catch (error: any) {
       console.error('Export failed:', error)

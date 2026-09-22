@@ -1,22 +1,29 @@
-import { apiFetch, fixImageUrl } from './api'
+import { API_URL, apiFetch, fixImageUrl } from './api'
 import type { Issue, IssueCategory, IssueStatus, ValidationResult, User, ContractorReportResponse } from '../types'
 
-export async function exportIssues(filters: Record<string, any>): Promise<Blob> {
+export async function exportIssues(filters: Record<string, any>): Promise<void> {
   const token = localStorage.getItem('civicpulse_token')
-  const response = await fetch('/api/issues/export', {
+  const response = await fetch(`${API_URL}/issues/export`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ filters }),
+    body: JSON.stringify(filters),
   })
   
   if (!response.ok) {
     throw new Error('Failed to export issues')
   }
   
-  return response.blob()
+  const blob = await response.blob()
+  const url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `Municipal_Issues_Export_${new Date().toISOString().split('T')[0]}.xlsx`
+  document.body.appendChild(a)
+  a.click()
+  window.URL.revokeObjectURL(url)
 }
 
 export async function getAllIssues(params?: Record<string, string>): Promise<Issue[]> {
@@ -291,7 +298,7 @@ export async function exportContractorWorkReport(filters: {
   status?: string
 }): Promise<void> {
   const token = localStorage.getItem('civicpulse_token')
-  const response = await fetch('/api/admin/contractor-reports/export', {
+  const response = await fetch(`${API_URL}/admin/contractor-reports/export`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

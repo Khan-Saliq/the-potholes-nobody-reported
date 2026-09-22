@@ -1497,4 +1497,100 @@ router.delete('/:id', authRequired, requireAnyAdmin, async (req, res) => {
   }
 })
 
+// POST /api/issues/export - Export issues register to Excel (.xlsx)
+router.post('/export', authRequired, requireAnyAdmin, async (req, res) => {
+  try {
+    const { status, category, department } = req.body || {}
+    const filter = {}
+    if (status && status !== 'all') filter.status = status
+    if (category && category !== 'all') filter.category = category
+    if (department && department !== 'all') filter.responsibleDepartment = department
+
+    const issues = await Issue.find(filter).sort({ createdAt: -1 })
+
+    const workbook = new ExcelJS.Workbook()
+    workbook.creator = 'CivicPulse Municipal Platform'
+    workbook.created = new Date()
+
+    const sheet = workbook.addWorksheet('Issues Register')
+
+    // Header styling
+    sheet.mergeCells('A1:L1')
+    const titleCell = sheet.getCell('A1')
+    titleCell.value = 'MUNICIPAL POTHOLE & ROAD COMPLAINTS REGISTER'
+    titleCell.font = { name: 'Calibri', size: 14, bold: true, color: { argb: 'FFFFFF' } }
+    titleCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '1E3A8A' } }
+    titleCell.alignment = { vertical: 'middle', horizontal: 'center' }
+    sheet.getRow(1).height = 30
+
+    const headers = [
+      'Complaint ID',
+      'Title',
+      'Category',
+      'Severity',
+      'Status',
+      'Location Address',
+      'Reporter',
+      'Contractor',
+      'Department',
+      'Priority Score',
+      'Reported Date',
+      'Completed Date',
+    ]
+
+    const headerRow = sheet.getRow(3)
+    headers.forEach((h, idx) => {
+      const cell = headerRow.getCell(idx + 1)
+      cell.value = h
+      cell.font = { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFF' } }
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: '1D4ED8' } }
+      cell.alignment = { vertical: 'middle', horizontal: 'center' }
+    })
+    headerRow.height = 24
+
+    issues.forEach((issue, idx) => {
+      const row = sheet.getRow(4 + idx)
+      row.values = [
+        issue.complaintId || `PT-${issue._id.toString().substring(0, 8)}`,
+        issue.title,
+        issue.category,
+        issue.severity,
+        issue.status.toUpperCase(),
+        issue.location?.address || '—',
+        issue.reporterName || '—',
+        issue.contractorName || issue.assignedTo || '—',
+        issue.responsibleDepartment || '—',
+        issue.priorityScore || 0,
+        issue.createdAt ? new Date(issue.createdAt).toLocaleString() : '—',
+        issue.status === 'completed' || issue.status === 'verified' ? (issue.updatedAt ? new Date(issue.updatedAt).toLocaleString() : '—') : '—',
+      ]
+    })
+
+    sheet.columns = [
+      { width: 16 },
+      { width: 28 },
+      { width: 22 },
+      { width: 10 },
+      { width: 18 },
+      { width: 35 },
+      { width: 20 },
+      { width: 22 },
+      { width: 24 },
+      { width: 14 },
+      { width: 20 },
+      { width: 20 },
+    ]
+
+    const buffer = await workbook.xlsx.writeBuffer()
+    const fileName = `Municipal_Issues_Export_${new Date().toISOString().split('T')[0]}.xlsx`
+
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`)
+    res.send(Buffer.from(buffer))
+  } catch (err) {
+    console.error('Export issues error:', err)
+    res.status(500).json({ error: err.message })
+  }
+})
+
 export default router
