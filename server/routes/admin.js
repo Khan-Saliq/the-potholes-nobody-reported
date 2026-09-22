@@ -26,7 +26,7 @@ router.get('/users', authRequired, requireAdmin, async (req, res) => {
       )
     }
 
-    const users = await User.find(filter).sort({ createdAt: -1 })
+    const users = await User.find(filter).sort({ createdAt: -1 }).lean()
     res.json(users.map(formatUser))
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -89,7 +89,7 @@ router.put('/users/:id/role', authRequired, requireAdmin, async (req, res) => {
 // GET List all contractors
 router.get('/contractors', authRequired, requireAdmin, async (req, res) => {
   try {
-    const contractors = await User.find({ role: 'contractor' }).sort({ name: 1 })
+    const contractors = await User.find({ role: 'contractor' }).sort({ name: 1 }).lean()
     res.json(contractors.map(formatUser))
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -99,8 +99,8 @@ router.get('/contractors', authRequired, requireAdmin, async (req, res) => {
 // GET Contractor Analytics
 router.get('/contractor-analytics', authRequired, requireAdmin, async (req, res) => {
   try {
-    const contractors = await User.find({ role: 'contractor' })
-    const issues = await Issue.find()
+    const contractors = await User.find({ role: 'contractor' }).lean()
+    const issues = await Issue.find().lean()
 
     const analytics = contractors.map((c) => {
       const cIssues = issues.filter(
@@ -172,7 +172,7 @@ async function getContractorReportData({ contractorId, fromDate, toDate, statusF
   }
 
   // 1. Get all active contractors
-  const contractors = await User.find({ role: 'contractor' }).sort({ name: 1 })
+  const contractors = await User.find({ role: 'contractor' }).sort({ name: 1 }).lean()
   const contractorMap = new Map()
   contractors.forEach((c) => contractorMap.set(c._id.toString(), c))
 
@@ -188,7 +188,7 @@ async function getContractorReportData({ contractorId, fromDate, toDate, statusF
       { contractorName: { $ne: null } },
       { assignedTo: { $ne: null } },
     ],
-  }).sort({ createdAt: -1 })
+  }).sort({ createdAt: -1 }).lean()
 
   // Helper to get timeline date for an action substring
   const getTimelineDate = (issue, actionSub) => {

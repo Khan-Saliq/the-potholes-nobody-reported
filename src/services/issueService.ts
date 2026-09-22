@@ -13,7 +13,8 @@ export async function exportIssues(filters: Record<string, any>): Promise<void> 
   })
   
   if (!response.ok) {
-    throw new Error('Failed to export issues')
+    const errorData = await response.json().catch(() => ({ error: 'Export failed' }))
+    throw new Error(errorData.error || `Failed to export issues (${response.status})`)
   }
   
   const blob = await response.blob()
@@ -24,6 +25,7 @@ export async function exportIssues(filters: Record<string, any>): Promise<void> 
   document.body.appendChild(a)
   a.click()
   window.URL.revokeObjectURL(url)
+  document.body.removeChild(a)
 }
 
 export async function getAllIssues(params?: Record<string, string>): Promise<Issue[]> {

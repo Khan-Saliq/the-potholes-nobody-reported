@@ -9,10 +9,10 @@ import { TrustScore } from '../../components/ui/TrustScore'
 import { fixImageUrl } from '../../services/api'
 import { useIssues } from '../../context/IssueContext'
 import { getFormattedArea } from '../../utils/geocoding'
-import { assignContractor, getContractors, reviewRepairVerification, deleteIssue } from '../../services/issueService'
+import { assignContractor, getContractors, getIssueById, reviewRepairVerification, deleteIssue } from '../../services/issueService'
 import { useToast } from '../../context/ToastContext'
 import { useConfirm } from '../../context/ConfirmContext'
-import type { User as UserType } from '../../types'
+import type { Issue, User as UserType } from '../../types'
 
 export function AdminIssueDetail() {
   const { id } = useParams()
@@ -29,8 +29,37 @@ export function AdminIssueDetail() {
   const [reviewing, setReviewing] = useState<boolean>(false)
   const [reviewNotes, setReviewNotes] = useState<string>('')
 
-  const issue = issues.find((i) => i.id === id)
+  const [currentIssue, setCurrentIssue] = useState<Issue | null>(null)
+  const [loadingIssue, setLoadingIssue] = useState<boolean>(true)
+
+  const issue = currentIssue || issues.find((i) => i.id === id || (i as any)._id === id)
   const canvasRef = useRef<HTMLCanvasElement | null>(null)
+
+  // Fetch issue directly by ID if not available or to get freshest data
+  useEffect(() => {
+    if (!id) return
+    let isMounted = true
+    const memoryMatch = issues.find((i) => i.id === id || (i as any)._id === id)
+    if (memoryMatch) {
+      setCurrentIssue(memoryMatch)
+      setLoadingIssue(false)
+    }
+
+    getIssueById(id)
+      .then((data) => {
+        if (isMounted && data) {
+          setCurrentIssue(data)
+        }
+      })
+      .catch((err) => console.warn('Could not fetch issue details by ID:', err))
+      .finally(() => {
+        if (isMounted) setLoadingIssue(false)
+      })
+
+    return () => {
+      isMounted = false
+    }
+  }, [id, issues])
 
   // Fetch area name & contractors list
   useEffect(() => {
@@ -83,10 +112,27 @@ export function AdminIssueDetail() {
     })
   }, [issue?.verificationResult])
 
+  if (loadingIssue && !issue) {
+    return (
+      <Layout>
+        <div className="flex items-center justify-center py-24 text-slate-400">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-cyan-500 border-t-transparent mr-3"></div>
+          Loading issue details...
+        </div>
+      </Layout>
+    )
+  }
+
   if (!issue) {
     return (
       <Layout>
-        <p className="text-slate-400">Issue not found.</p>
+        <div className="py-12 text-center">
+          <p className="text-lg font-semibold text-slate-300">Issue Not Found</p>
+          <p className="mt-1 text-sm text-slate-500">The requested pothole complaint could not be retrieved from the database.</p>
+          <button onClick={() => navigate('/admin/issues')} className="mt-4 rounded-xl bg-slate-800 px-4 py-2 text-sm text-slate-200 hover:bg-slate-700">
+            Back to Issues List
+          </button>
+        </div>
       </Layout>
     )
   }

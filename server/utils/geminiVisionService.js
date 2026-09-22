@@ -3,8 +3,8 @@ import fs from 'fs'
 import path from 'path'
 
 const API_KEY = process.env.GEMINI_API_KEY
-const DEFAULT_MODEL = 'gemini-3.5-flash-lite'
-const FALLBACK_MODEL = 'gemini-3.5-flash'
+const DEFAULT_MODEL = 'gemini-2.5-flash'
+const FALLBACK_MODEL = 'gemini-1.5-flash'
 
 /**
  * Converts various image inputs (base64 data URI, HTTP URL, local path, raw base64)
@@ -29,7 +29,7 @@ export async function getImageBase64AndMime(imageInput) {
   // Handle HTTP/HTTPS URL (e.g. Cloudinary, Unsplash, external link)
   if (typeof imageInput === 'string' && (imageInput.startsWith('http://') || imageInput.startsWith('https://'))) {
     try {
-      const response = await axios.get(imageInput, { responseType: 'arraybuffer', timeout: 10000 })
+      const response = await axios.get(imageInput, { responseType: 'arraybuffer', timeout: 5000 })
       const contentType = response.headers['content-type'] || 'image/jpeg'
       const base64Data = Buffer.from(response.data).toString('base64')
       return { mimeType: contentType.split(';')[0], base64Data }
@@ -69,11 +69,10 @@ export async function getImageBase64AndMime(imageInput) {
 async function callGeminiVision(parts, systemInstruction = '') {
   const apiKey = process.env.GEMINI_API_KEY || API_KEY
   if (!apiKey) {
-    console.warn('⚠️ GEMINI_API_KEY not configured. Falling back to local analysis.')
     return null
   }
 
-  const models = [DEFAULT_MODEL, FALLBACK_MODEL, 'gemini-flash-latest', 'gemini-3.1-flash-lite', 'gemini-3.6-flash']
+  const models = ['gemini-2.5-flash', 'gemini-1.5-flash', 'gemini-2.0-flash']
   let lastError = null
 
   for (const model of models) {
@@ -95,7 +94,7 @@ async function callGeminiVision(parts, systemInstruction = '') {
             responseMimeType: 'application/json',
           },
         },
-        { timeout: 15000 }
+        { timeout: 3500 }
       )
 
       const text = response.data?.candidates?.[0]?.content?.parts?.[0]?.text
@@ -103,18 +102,15 @@ async function callGeminiVision(parts, systemInstruction = '') {
         try {
           return JSON.parse(text)
         } catch (parseErr) {
-          console.warn(`⚠️ Failed to parse Gemini response text as JSON from model ${model}:`, text)
           const cleanedText = text.replace(/```json\n?|\n?```/g, '').trim()
           return JSON.parse(cleanedText)
         }
       }
     } catch (err) {
       lastError = err.response?.data?.error?.message || err.message
-      console.warn(`⚠️ Gemini API error with model ${model}:`, lastError)
     }
   }
 
-  console.error('❌ All Gemini Vision models failed:', lastError)
   return null
 }
 

@@ -259,7 +259,7 @@ router.get('/', authOptional, async (req, res) => {
     let sort = { priorityScore: -1 }
     if (req.query.sort === 'date') sort = { createdAt: -1 }
 
-    let q = Issue.find(query).sort(sort)
+    let q = Issue.find(query).sort(sort).lean()
     if (req.query.limit) q = q.limit(parseInt(req.query.limit, 10))
 
     const issues = await q
@@ -276,7 +276,7 @@ router.get('/stats', authOptional, async (req, res) => {
       statsFilter.responsibleDepartment = req.query.department
     }
 
-    const issues = await Issue.find(statsFilter)
+    const issues = await Issue.find(statsFilter).lean()
     const now = new Date()
 
     res.json({
@@ -435,7 +435,7 @@ router.get('/contractor/my-tasks', authRequired, async (req, res) => {
         { assignedTo: req.user.name },
         { contractorName: req.user.name }
       ]
-    }).sort({ createdAt: -1 })
+    }).sort({ createdAt: -1 }).lean()
     
     res.json(tasks.map(formatIssue))
   } catch (err) {
@@ -462,7 +462,7 @@ router.post('/check-duplicates', authOptional, async (req, res) => {
           $maxDistance: 50, // 50 meters radius
         },
       },
-    }).limit(5)
+    }).limit(5).lean()
 
     res.json({
       hasDuplicates: nearbyOpen.length > 0,
@@ -475,7 +475,17 @@ router.post('/check-duplicates', authOptional, async (req, res) => {
 
 router.get('/:id', authOptional, async (req, res) => {
   try {
-    const issue = await Issue.findById(req.params.id)
+    const { id } = req.params
+    if (!id || id === 'undefined' || id === 'null') {
+      return res.status(400).json({ error: 'Invalid issue ID' })
+    }
+    let issue = null
+    if (id.match(/^[0-9a-fA-F]{24}$/)) {
+      issue = await Issue.findById(id).lean()
+    }
+    if (!issue) {
+      issue = await Issue.findOne({ $or: [{ complaintId: id }, { operationId: id }] }).lean()
+    }
     if (!issue) return res.status(404).json({ error: 'Issue not found' })
     res.json(formatIssue(issue))
   } catch (err) {

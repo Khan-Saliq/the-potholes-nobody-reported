@@ -24,7 +24,8 @@ export const IssueCard = memo(function IssueCard({
   adminLink?: boolean
   delay?: number
 }) {
-  const to = adminLink ? `/admin/issues/${issue.id}` : `/my-issues#${issue.id}`
+  const issueId = issue.id || (issue as any)._id
+  const to = adminLink ? `/admin/issues/${issueId}` : `/my-issues#${issueId}`
 
   return (
     <Link
