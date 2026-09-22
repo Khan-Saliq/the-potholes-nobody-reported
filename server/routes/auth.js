@@ -34,7 +34,7 @@ router.post('/login', async (req, res) => {
 
 router.post('/register', async (req, res) => {
   try {
-    const { name, email, password } = req.body
+    const { name, email, password, role } = req.body
     if (!name || !email || !password) {
       return res.status(400).json({ error: 'All fields required' })
     }
@@ -44,12 +44,17 @@ router.post('/register', async (req, res) => {
       return res.status(409).json({ error: 'Email already registered' })
     }
 
+    const validRoles = ['citizen', 'admin', 'contractor']
+    const assignedRole = role && validRoles.includes(role) ? role : 'citizen'
+
     const hashed = await bcrypt.hash(password, 10)
     const user = await User.create({
       name,
       email: email.toLowerCase(),
       password: hashed,
-      role: 'citizen',
+      role: assignedRole,
+      companyName: assignedRole === 'contractor' ? 'Apex Infra Repairs Ltd' : null,
+      assignedDepartment: assignedRole === 'contractor' ? 'Roads & Bridges Department' : null,
       trustScore: DEFAULT_TRUST_SCORE,
     })
 
@@ -64,29 +69,22 @@ router.get('/me', authRequired, (req, res) => {
   res.json({ user: req.user })
 })
 
-router.post('/promote', authRequired, requireAdmin, async (req, res) => {
+router.post('/apply-contractor', authRequired, async (req, res) => {
   try {
-    const { email, role, department } = req.body
-    if (!email) {
-      return res.status(400).json({ error: 'Email is required' })
-    }
+    const { companyName, assignedDepartment } = req.body
+    const user = await User.findById(req.user.id)
+    if (!user) return res.status(404).json({ error: 'User not found' })
 
-    const user = await User.findOne({ email: email.toLowerCase() })
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' })
-    }
-
-    const promoteRole = role === 'department_admin' ? 'department_admin' : 'admin'
-    user.role = promoteRole
-    user.department = promoteRole === 'department_admin' ? department || null : null
-
-    if (promoteRole === 'department_admin' && !user.department) {
-      return res.status(400).json({ error: 'Department is required for department admin' })
+    user.contractorApplication = {
+      status: 'pending',
+      requestedAt: new Date(),
+      companyName: companyName || 'Civic Infra Repairs Ltd',
+      assignedDepartment: assignedDepartment || 'Roads & Bridges Department',
+      notes: 'Citizen requested contractor access',
     }
 
     await user.save()
-
-    res.json({ user: formatUser(user) })
+    res.json({ message: 'Contractor application submitted for admin review', user: formatUser(user) })
   } catch (err) {
     res.status(500).json({ error: err.message })
   }

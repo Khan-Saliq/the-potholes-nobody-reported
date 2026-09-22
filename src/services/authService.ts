@@ -40,10 +40,9 @@ export async function validateSession(): Promise<Omit<User, 'password'> | null> 
   return fetchMe()
 }
 
-export async function promoteToAdmin(email: string, role: 'admin' | 'department_admin', department?: string): Promise<Omit<User, 'password'>> {
-  const { user } = await apiFetch<{ user: Omit<User, 'password'> }>('/auth/promote', {
+export async function applyForContractor(companyName?: string, assignedDepartment?: string): Promise<{ message: string; user: Omit<User, 'password'> }> {
+  return apiFetch<{ message: string; user: Omit<User, 'password'> }>('/auth/apply-contractor', {
     method: 'POST',
-    body: JSON.stringify({ email, role, department }),
+    body: JSON.stringify({ companyName, assignedDepartment }),
   })
-  return user
 }

@@ -64,39 +64,65 @@ router.post('/image', authRequired, async (req, res) => {
       return res.status(400).json({ error: 'imageBase64 required' })
     }
 
-    const match = imageBase64.match(/^data:(image\/\w+);base64,(.+)$/)
-    if (!match) {
+    let match = imageBase64.match(/^data:([^;]+);base64,(.+)$/)
+    let ext = 'jpg'
+    let buffer = null
+
+    if (match) {
+      const mime = match[1] || 'image/jpeg'
+      ext = mime.split('/')[1] || 'jpg'
+      if (ext === 'octet-stream' || ext === 'png') ext = ext === 'png' ? 'png' : 'jpg'
+      buffer = Buffer.from(match[2], 'base64')
+    } else if (typeof imageBase64 === 'string' && imageBase64.length > 50) {
+      buffer = Buffer.from(imageBase64.replace(/^data:.*?;base64,/, ''), 'base64')
+    } else {
       return res.status(400).json({ error: 'Invalid image format. Send data URL base64.' })
     }
-
-    const ext = match[1].split('/')[1] || 'jpg'
-    const buffer = Buffer.from(match[2], 'base64')
     const name = `${Date.now()}-${filename || 'upload'}.${ext}`.replace(/[^a-zA-Z0-9._-]/g, '')
     
-    // Upload to Cloudinary
-    console.log('Uploading to Cloudinary...')
-    const result = await new Promise((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(
-        {
-          folder: 'civicpulse',
-          public_id: name.replace(/\.[^/.]+$/, ''),
-          resource_type: 'image',
-        },
-        (error, result) => {
-          if (error) {
-            console.error('Cloudinary upload error:', error)
-            reject(error)
-          } else {
-            console.log('Cloudinary upload successful:', result.secure_url)
-            resolve(result)
-          }
-        }
-      )
-      uploadStream.end(buffer)
-    })
+    let url = null
 
-    const url = result.secure_url
-    console.log('Image URL:', url)
+    // Try uploading to Cloudinary if fully configured
+    if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+      try {
+        console.log('Uploading image to Cloudinary...')
+        const result = await new Promise((resolve, reject) => {
+          try {
+            const uploadStream = cloudinary.uploader.upload_stream(
+              {
+                folder: 'civicpulse',
+                public_id: name.replace(/\.[^/.]+$/, ''),
+                resource_type: 'image',
+              },
+              (error, result) => {
+                if (error) {
+                  console.error('Cloudinary upload error:', error.message || error)
+                  reject(error)
+                } else {
+                  resolve(result)
+                }
+              }
+            )
+            uploadStream.end(buffer)
+          } catch (e) {
+            reject(e)
+          }
+        })
+        url = result?.secure_url
+      } catch (cloudErr) {
+        console.warn('⚠️ Cloudinary upload failed, using local filesystem fallback:', cloudErr.message || cloudErr)
+      }
+    }
+
+    // Local filesystem fallback
+    if (!url) {
+      const localFilePath = path.join(uploadsDir, name)
+      fs.writeFileSync(localFilePath, buffer)
+      const host = req.get('host') || 'localhost:5000'
+      const protocol = req.protocol || 'http'
+      url = `${protocol}://${host}/uploads/${name}`
+      console.log('Saved image locally:', url)
+    }
 
     await Upload.create({
       filename: name,
@@ -115,7 +141,7 @@ router.post('/image', authRequired, async (req, res) => {
 
 router.post('/media', authRequired, async (req, res) => {
   try {
-    const { mediaBase64, filename, issueId, mediaType } = req.body
+    const { mediaBase64, filename, issueId } = req.body
     if (!mediaBase64) {
       return res.status(400).json({ error: 'mediaBase64 required' })
     }
@@ -137,23 +163,44 @@ router.post('/media', authRequired, async (req, res) => {
     const buffer = Buffer.from(match[2], 'base64')
     const name = `${Date.now()}-${filename || 'upload'}.${ext}`.replace(/[^a-zA-Z0-9._-]/g, '')
     
-    // Upload to Cloudinary
-    const result = await new Promise((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(
-        {
-          folder: 'civicpulse',
-          public_id: name.replace(/\.[^/.]+$/, ''),
-          resource_type: isVideo ? 'video' : 'image',
-        },
-        (error, result) => {
-          if (error) reject(error)
-          else resolve(result)
-        }
-      )
-      uploadStream.end(buffer)
-    })
+    let url = null
 
-    const url = result.secure_url
+    // Try uploading to Cloudinary
+    if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY && process.env.CLOUDINARY_API_SECRET) {
+      try {
+        const result = await new Promise((resolve, reject) => {
+          try {
+            const uploadStream = cloudinary.uploader.upload_stream(
+              {
+                folder: 'civicpulse',
+                public_id: name.replace(/\.[^/.]+$/, ''),
+                resource_type: isVideo ? 'video' : 'image',
+              },
+              (error, result) => {
+                if (error) reject(error)
+                else resolve(result)
+              }
+            )
+            uploadStream.end(buffer)
+          } catch (e) {
+            reject(e)
+          }
+        })
+        url = result?.secure_url
+      } catch (cloudErr) {
+        console.warn('⚠️ Cloudinary media upload failed, using local fallback:', cloudErr.message || cloudErr)
+      }
+    }
+
+    // Local filesystem fallback
+    if (!url) {
+      const localFilePath = path.join(uploadsDir, name)
+      fs.writeFileSync(localFilePath, buffer)
+      const host = req.get('host') || 'localhost:5000'
+      const protocol = req.protocol || 'http'
+      url = `${protocol}://${host}/uploads/${name}`
+      console.log('Saved media locally:', url)
+    }
 
     await Upload.create({
       filename: name,

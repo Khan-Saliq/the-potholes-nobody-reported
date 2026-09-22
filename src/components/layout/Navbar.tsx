@@ -2,7 +2,8 @@ import { Link, NavLink, useNavigate } from 'react-router-dom'
 import { Bell, LogOut, MapPin, Menu, Shield, X } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { useAuth } from '../../context/AuthContext'
-import { getAdminNotifications, getUserNotifications } from '../../services/notificationService'
+import { ConnectivityIndicator } from '../ui/ConnectivityIndicator'
+import { getUnreadNotificationCount } from '../../services/notificationService'
 
 const navLinkClass = ({ isActive }: { isActive: boolean }) =>
   `rounded-lg px-3 py-2 text-sm font-medium transition-all duration-300 ${
@@ -23,19 +24,17 @@ export function Navbar() {
       return
     }
 
-    const loadNotifications = async () => {
+    const loadUnreadCount = async () => {
       try {
-        const notifications = user.role === 'admin'
-          ? await getAdminNotifications()
-          : await getUserNotifications()
-        setUnreadNotifications(notifications.filter((notification) => !notification.read).length)
+        const count = await getUnreadNotificationCount()
+        setUnreadNotifications(count)
       } catch {
         setUnreadNotifications(0)
       }
     }
 
-    loadNotifications()
-    const interval = window.setInterval(loadNotifications, 30000)
+    loadUnreadCount()
+    const interval = window.setInterval(loadUnreadCount, 30000)
     return () => window.clearInterval(interval)
   }, [user])
 
@@ -49,30 +48,45 @@ export function Navbar() {
     { to: '/dashboard', label: 'Dashboard' },
     { to: '/report', label: 'Report Issue' },
     { to: '/my-issues', label: 'My Issues' },
+    { to: '/map', label: 'Pothole Map' },
     { to: '/notifications', label: 'Notifications' },
-    { to: '/nearby', label: 'Nearby' },
-    { to: '/uploads', label: 'Uploads' },
-    { to: '/chat-history', label: 'Chat History' },
-    { to: '/heatmap', label: 'Heatmap' },
+  ]
+
+  const contractorLinks = [
+    { to: '/contractor/dashboard', label: 'Contractor Portal' },
+    { to: '/map', label: 'Pothole Map' },
+    { to: '/notifications', label: 'Notifications' },
   ]
 
   const adminLinks = [
     { to: '/admin', label: 'Dashboard' },
+    { to: '/admin/users', label: 'User Roles' },
     { to: '/admin/issues', label: 'Issues' },
-    { to: '/admin/validation', label: 'AI Validation' },
-    { to: '/admin/notifications', label: 'Notifications' },
-    { to: '/uploads', label: 'Uploads' },
-    { to: '/chat-history', label: 'Chat History' },
-    { to: '/heatmap', label: 'Heatmap' },
+    { to: '/admin/contractors', label: 'Contractor Analytics' },
+    { to: '/admin/contractor-reports', label: 'Work Reports' },
+    { to: '/map', label: 'Pothole Map' },
+    { to: '/notifications', label: 'Notifications' },
   ]
 
-  const links = user?.role !== 'citizen' ? adminLinks : citizenLinks
+  const links =
+    user?.role === 'contractor'
+      ? contractorLinks
+      : user?.role === 'admin'
+      ? adminLinks
+      : citizenLinks
+
+  const homeTarget =
+    user?.role === 'contractor'
+      ? '/contractor/dashboard'
+      : user?.role === 'admin'
+      ? '/admin'
+      : '/dashboard'
 
   return (
     <header className="glass-nav sticky top-0 z-50">
       <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6">
         <Link
-          to={user ? (user.role !== 'citizen' ? '/admin' : '/dashboard') : '/'}
+          to={user ? homeTarget : '/'}
           className="group flex items-center gap-2 transition-transform duration-300 hover:scale-105"
         >
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-cyan-400 to-violet-500 shadow-lg shadow-cyan-500/25 transition-shadow group-hover:shadow-cyan-500/40">
@@ -93,10 +107,11 @@ export function Navbar() {
         </nav>
 
         <div className="hidden items-center gap-3 md:flex">
+          <ConnectivityIndicator />
           {user ? (
             <>
               <button
-                onClick={() => navigate(user?.role !== 'citizen' ? '/admin/notifications' : '/notifications')}
+                onClick={() => navigate('/notifications')}
                 className="relative rounded-xl p-2 text-slate-200 transition hover:bg-white/5"
                 aria-label="Notifications"
               >
@@ -111,10 +126,10 @@ export function Navbar() {
                 <p className="text-sm font-medium text-slate-100">{user.name}</p>
                 <p className="flex items-center justify-end gap-1 text-xs text-slate-500">
                   <Shield className="h-3 w-3 text-violet-400" />
-                  {user.role !== 'citizen' ? (
-                    <span className="text-violet-400">
-                      {user.role === 'admin' ? 'Administrator' : 'Department Admin'}
-                    </span>
+                  {user.role === 'contractor' ? (
+                    <span className="text-amber-400 font-medium">Contractor</span>
+                  ) : user.role === 'admin' ? (
+                    <span className="text-violet-400 font-medium">Administrator</span>
                   ) : (
                     <>Trust: <span className="text-cyan-400">{user.trustScore}%</span></>
                   )}
@@ -137,13 +152,16 @@ export function Navbar() {
           )}
         </div>
 
-        <button
-          className="rounded-lg p-2 text-slate-400 transition hover:bg-white/5 hover:text-cyan-300 md:hidden"
-          onClick={() => setOpen(!open)}
-          aria-label="Toggle menu"
-        >
-          {open ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
-        </button>
+        <div className="flex items-center gap-2 md:hidden">
+          <ConnectivityIndicator />
+          <button
+            className="rounded-lg p-2 text-slate-400 transition hover:bg-white/5 hover:text-cyan-300"
+            onClick={() => setOpen(!open)}
+            aria-label="Toggle menu"
+          >
+            {open ? <X className="h-6 w-6" /> : <Menu className="h-6 w-6" />}
+          </button>
+        </div>
       </div>
 
       {open && (

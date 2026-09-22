@@ -1,24 +1,43 @@
 import { Router } from 'express'
-import { authRequired, requireAnyAdmin } from '../middleware/auth.js'
+import { authRequired } from '../middleware/auth.js'
 import Notification from '../models/Notification.js'
+import UserNotification from '../models/UserNotification.js'
 
 const router = Router()
 
-router.get('/', authRequired, requireAnyAdmin, async (req, res) => {
+// GET /api/notifications/unread-count - Lightweight endpoint for Navbar badge polling
+router.get('/unread-count', authRequired, async (req, res) => {
   try {
-    let notifications = await Notification.find({ adminId: req.user.id })
-      .sort({ createdAt: -1 })
-      .populate('issueId', 'title status responsibleDepartment')
-      .lean()
+    const [count1, count2] = await Promise.all([
+      Notification.countDocuments({ userId: req.user.id, read: false }),
+      UserNotification.countDocuments({ userId: req.user.id, read: false }),
+    ])
+    res.json({ unreadCount: count1 + count2 })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
 
-    if (req.user.role === 'department_admin') {
-      notifications = notifications.filter(
-        (item) => item.issueId?.responsibleDepartment === req.user.department
-      )
-    }
+// GET /api/notifications - Get all notifications for current user (Parallel DB Fetch)
+router.get('/', authRequired, async (req, res) => {
+  try {
+    const [notifications, userNotifications] = await Promise.all([
+      Notification.find({ userId: req.user.id })
+        .sort({ createdAt: -1 })
+        .populate('issueId', 'title status complaintId')
+        .lean(),
+      UserNotification.find({ userId: req.user.id })
+        .sort({ createdAt: -1 })
+        .populate('issueId', 'title status complaintId')
+        .lean(),
+    ])
+
+    const combined = [...notifications, ...userNotifications].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    )
 
     res.json(
-      notifications.map((item) => ({
+      combined.map((item) => ({
         ...item,
         id: item._id.toString(),
       }))
@@ -28,21 +47,34 @@ router.get('/', authRequired, requireAnyAdmin, async (req, res) => {
   }
 })
 
-router.patch('/:id/read', authRequired, requireAnyAdmin, async (req, res) => {
+// PATCH /api/notifications/read-all - Mark all notifications as read
+router.patch('/read-all', authRequired, async (req, res) => {
   try {
-    const notification = await Notification.findById(req.params.id)
+    await Promise.all([
+      Notification.updateMany({ userId: req.user.id, read: false }, { read: true }),
+      UserNotification.updateMany({ userId: req.user.id, read: false }, { read: true }),
+    ])
+    res.json({ message: 'All notifications marked as read' })
+  } catch (err) {
+    res.status(500).json({ error: err.message })
+  }
+})
+
+// PATCH /api/notifications/:id/read - Mark single notification as read
+router.patch('/:id/read', authRequired, async (req, res) => {
+  try {
+    const notification = await Notification.findOneAndUpdate(
+      { _id: req.params.id, userId: req.user.id },
+      { read: true },
+      { new: true }
+    ).lean()
+
     if (!notification) {
       return res.status(404).json({ error: 'Notification not found' })
     }
-    if (notification.adminId.toString() !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied to modify this notification' })
-    }
-
-    notification.read = true
-    await notification.save()
 
     res.json({
-      ...notification.toObject(),
+      ...notification,
       id: notification._id.toString(),
     })
   } catch (err) {
@@ -50,17 +82,13 @@ router.patch('/:id/read', authRequired, requireAnyAdmin, async (req, res) => {
   }
 })
 
-router.delete('/:id', authRequired, requireAnyAdmin, async (req, res) => {
+// DELETE /api/notifications/:id - Delete notification
+router.delete('/:id', authRequired, async (req, res) => {
   try {
-    const notification = await Notification.findById(req.params.id)
-    if (!notification) {
+    const result = await Notification.findOneAndDelete({ _id: req.params.id, userId: req.user.id })
+    if (!result) {
       return res.status(404).json({ error: 'Notification not found' })
     }
-    if (notification.adminId.toString() !== req.user.id) {
-      return res.status(403).json({ error: 'Access denied to delete this notification' })
-    }
-
-    await notification.remove()
     res.json({ message: 'Notification deleted' })
   } catch (err) {
     res.status(500).json({ error: err.message })

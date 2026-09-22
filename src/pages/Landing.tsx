@@ -76,6 +76,10 @@ export function Landing() {
                 Get Started
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-1" />
               </Link>
+              <Link to="/map" className="btn-ghost px-5 py-3 text-cyan-300 border-cyan-500/30">
+                <Map className="h-4 w-4 text-cyan-400" />
+                View Pothole Map
+              </Link>
               <Link to="/login" className="btn-ghost px-5 py-3">
                 Sign In
               </Link>

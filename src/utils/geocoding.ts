@@ -1,8 +1,10 @@
 // Reverse geocoding utility - converts coordinates to readable area names
 // Works globally - will show area names like "Govandi", "Wadala", "Kurla" in Mumbai, or any area worldwide
 export async function getAreaFromCoordinates(lat: number, lng: number): Promise<string> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return `GPS: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
+  }
   try {
-    console.log(`Fetching area for coordinates: ${lat}, ${lng}`)
     
     const response = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`,
@@ -19,7 +21,6 @@ export async function getAreaFromCoordinates(lat: number, lng: number): Promise<
     }
     
     const data = await response.json()
-    console.log('Geocoding response:', data)
     
     if (!data.address) {
       throw new Error('No address data in response')
@@ -44,7 +45,6 @@ export async function getAreaFromCoordinates(lat: number, lng: number): Promise<
       address.state ||
       'Unknown Area'
     
-    console.log(`Area detected: ${areaName}`)
     return areaName
   } catch (error) {
     console.error('Reverse geocoding error:', error)
@@ -55,6 +55,9 @@ export async function getAreaFromCoordinates(lat: number, lng: number): Promise<
 
 // Get formatted area display string with city and area
 export async function getFormattedArea(lat: number, lng: number): Promise<string> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    return `${lat.toFixed(6)}, ${lng.toFixed(6)}`
+  }
   try {
     const response = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=16&addressdetails=1`,
@@ -97,5 +100,31 @@ export async function getFormattedArea(lat: number, lng: number): Promise<string
   } catch (error) {
     console.error('Formatted area error:', error)
     return await getAreaFromCoordinates(lat, lng)
+  }
+}
+
+// Forward geocoding utility - converts search query text to coordinates & address
+export async function searchLocationCoordinates(query: string): Promise<{ lat: number; lng: number; displayName: string }[]> {
+  if (!query || query.trim().length < 2) return []
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=5&addressdetails=1`,
+      {
+        headers: {
+          'User-Agent': 'CivicPulseApp/1.0',
+          'Accept-Language': 'en'
+        }
+      }
+    )
+    if (!response.ok) return []
+    const data = await response.json()
+    return data.map((item: any) => ({
+      lat: parseFloat(item.lat),
+      lng: parseFloat(item.lon),
+      displayName: item.display_name,
+    }))
+  } catch (error) {
+    console.error('Forward geocoding search error:', error)
+    return []
   }
 }

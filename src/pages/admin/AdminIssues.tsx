@@ -4,27 +4,64 @@ import { AnimatedPage } from '../../components/ui/AnimatedPage'
 import { IssueCard } from '../../components/issues/IssueCard'
 import { useConfig } from '../../context/ConfigContext'
 import { useAuth } from '../../context/AuthContext'
-import { getAllIssues, exportIssues } from '../../services/issueService'
-import type { Issue, IssueStatus, IssueCategory } from '../../types'
-import { Download, Filter, Calendar } from 'lucide-react'
+import { getAllIssues, exportIssues, clearAllIssues } from '../../services/issueService'
+import { clearCachedIssuesLocally } from '../../services/offlineStorage'
+import type { Issue, IssueStatus } from '../../types'
+import { Download, Filter, Calendar, Trash2 } from 'lucide-react'
+import { useToast } from '../../context/ToastContext'
+import { useConfirm } from '../../context/ConfirmContext'
 
 export function AdminIssues() {
   const { config } = useConfig()
   const { user } = useAuth()
+  const { toast } = useToast()
+  const { confirmAction } = useConfirm()
   const [issues, setIssues] = useState<Issue[]>([])
   const [loading, setLoading] = useState(true)
   const [statusFilter, setStatusFilter] = useState<IssueStatus | 'all'>('all')
   const [sortBy, setSortBy] = useState<'priority' | 'date'>('priority')
   const [selectedDepartment, setSelectedDepartment] = useState<string>('all')
+  const [clearing, setClearing] = useState(false)
   
   // Advanced filters
   const [showFilters, setShowFilters] = useState(false)
-  const [categoryFilter, setCategoryFilter] = useState<IssueCategory | 'all'>('all')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [filterMonth, setFilterMonth] = useState('')
   const [filterYear, setFilterYear] = useState('')
   const [exporting, setExporting] = useState(false)
+
+  const handleClearAllIssues = () => {
+    confirmAction({
+      title: 'Clear All System Issues & Notifications',
+      description: (
+        <div className="space-y-2 text-xs">
+          <p className="font-bold text-rose-300">Are you sure you want to clear ALL issues from the database?</p>
+          <p className="text-slate-300">
+            This action will permanently delete all pothole complaints, citizen report timelines, contractor task assignments, and clear all user/contractor notifications across the platform.
+          </p>
+        </div>
+      ),
+      variant: 'danger',
+      confirmText: 'Yes, Clear All Issues',
+      cancelText: 'Cancel',
+      onConfirm: async () => {
+        try {
+          setClearing(true)
+          const res = await clearAllIssues()
+          await clearCachedIssuesLocally()
+          window.dispatchEvent(new Event('civicsync_sync_event'))
+          toast.success('System Reset Successful', res.message || 'All issues and notifications cleared.')
+          setIssues([])
+        } catch (err: any) {
+          console.error('Failed to clear issues:', err)
+          toast.error('Clear Failed', err?.message || 'Failed to clear issues from database')
+        } finally {
+          setClearing(false)
+        }
+      },
+    })
+  }
 
   const departments = useMemo(
     () => Array.from(new Set((config?.categories ?? []).map((category) => category.department ?? '').filter(Boolean))),
@@ -32,38 +69,28 @@ export function AdminIssues() {
   )
 
   useEffect(() => {
-    if (user?.role === 'department_admin') {
-      setSelectedDepartment(user.department || 'all')
-    }
-  }, [user])
-
-  useEffect(() => {
     setLoading(true)
     const params: Record<string, string> = {}
     if (statusFilter !== 'all') params.status = statusFilter
-    if (categoryFilter !== 'all') params.category = categoryFilter
     if (startDate) params.startDate = startDate
     if (endDate) params.endDate = endDate
     if (filterMonth) params.month = filterMonth
     if (filterYear) params.year = filterYear
     if (sortBy === 'date') params.sort = 'date'
-    if (user?.role === 'department_admin') {
-      params.department = user.department || 'all'
-    } else if (selectedDepartment !== 'all') {
+    if (selectedDepartment !== 'all') {
       params.department = selectedDepartment
     }
     getAllIssues(params)
       .then(setIssues)
       .catch(console.error)
       .finally(() => setLoading(false))
-  }, [statusFilter, categoryFilter, startDate, endDate, filterMonth, filterYear, sortBy, selectedDepartment, user])
+  }, [statusFilter, startDate, endDate, filterMonth, filterYear, sortBy, selectedDepartment])
 
   const handleExport = async () => {
     setExporting(true)
     try {
       const filters = {
         status: statusFilter !== 'all' ? statusFilter : undefined,
-        category: categoryFilter !== 'all' ? categoryFilter : undefined,
         startDate: startDate || undefined,
         endDate: endDate || undefined,
         month: filterMonth || undefined,
@@ -78,23 +105,23 @@ export function AdminIssues() {
       link.click()
       document.body.removeChild(link)
       window.URL.revokeObjectURL(url)
-    } catch (error) {
+      toast.success('Issues Exported', 'Issues report downloaded successfully.')
+    } catch (error: any) {
       console.error('Export failed:', error)
-      alert('Failed to export issues')
+      toast.error('Export Failed', error?.message || 'Failed to export issues')
     } finally {
       setExporting(false)
     }
   }
 
   const clearFilters = () => {
-    setCategoryFilter('all')
     setStartDate('')
     setEndDate('')
     setFilterMonth('')
     setFilterYear('')
   }
 
-  const hasActiveFilters = categoryFilter !== 'all' || startDate || endDate || filterMonth || filterYear
+  const hasActiveFilters = Boolean(startDate || endDate || filterMonth || filterYear)
 
   return (
     <Layout>
@@ -129,7 +156,7 @@ export function AdminIssues() {
             Advanced Filters
             {hasActiveFilters && (
               <span className="ml-1 flex h-5 w-5 items-center justify-center rounded-full bg-cyan-500 text-xs text-white">
-                {[categoryFilter !== 'all', startDate, endDate, filterMonth, filterYear].filter(Boolean).length}
+                {[startDate, endDate, filterMonth, filterYear].filter(Boolean).length}
               </span>
             )}
           </button>
@@ -143,6 +170,18 @@ export function AdminIssues() {
             <Download className="h-4 w-4" />
             {exporting ? 'Exporting...' : 'Export Excel'}
           </button>
+
+          {/* Clear All Issues Button (Admin Only) */}
+          {user?.role === 'admin' && (
+            <button
+              onClick={handleClearAllIssues}
+              disabled={clearing || issues.length === 0}
+              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-rose-600 to-red-700 px-3 py-2 text-sm font-medium text-white transition-all hover:shadow-lg hover:shadow-rose-500/30 disabled:opacity-50"
+            >
+              <Trash2 className="h-4 w-4" />
+              {clearing ? 'Clearing...' : 'Clear All Issues'}
+            </button>
+          )}
           
           {user?.role === 'admin' && (
             <select value={selectedDepartment} onChange={(e) => setSelectedDepartment(e.target.value)} className="input-dark w-auto text-sm">
@@ -152,11 +191,7 @@ export function AdminIssues() {
               ))}
             </select>
           )}
-          {user?.role === 'department_admin' && (
-            <span className="rounded-full bg-white/5 px-3 py-2 text-sm text-cyan-200">
-              Department: {user.department || 'Unknown'}
-            </span>
-          )}
+
         </div>
 
         {/* Advanced Filters Panel */}
@@ -176,21 +211,7 @@ export function AdminIssues() {
                 </button>
               )}
             </div>
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-              {/* Category Filter */}
-              <div>
-                <label className="mb-1 block text-xs text-slate-400">Category</label>
-                <select
-                  value={categoryFilter}
-                  onChange={(e) => setCategoryFilter(e.target.value as IssueCategory | 'all')}
-                  className="input-dark w-full text-sm"
-                >
-                  <option value="all">All Categories</option>
-                  {(config?.categories ?? []).map((cat) => (
-                    <option key={cat.id} value={cat.id}>{cat.label}</option>
-                  ))}
-                </select>
-              </div>
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
               
               {/* Start Date */}
               <div>

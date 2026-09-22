@@ -12,4 +12,7 @@ const userNotificationSchema = new mongoose.Schema(
   { timestamps: true }
 )
 
+userNotificationSchema.index({ userId: 1, createdAt: -1 })
+userNotificationSchema.index({ userId: 1, read: 1 })
+
 export default mongoose.model('UserNotification', userNotificationSchema)

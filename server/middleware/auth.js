@@ -41,8 +41,15 @@ export function requireAdmin(req, res, next) {
 }
 
 export function requireAnyAdmin(req, res, next) {
-  if (req.user?.role !== 'admin' && req.user?.role !== 'department_admin') {
+  if (req.user?.role !== 'admin') {
     return res.status(403).json({ error: 'Admin access required' })
+  }
+  next()
+}
+
+export function requireContractor(req, res, next) {
+  if (req.user?.role !== 'contractor' && req.user?.role !== 'admin') {
+    return res.status(403).json({ error: 'Contractor access required' })
   }
   next()
 }

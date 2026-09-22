@@ -14,56 +14,6 @@ export const ISSUE_CATEGORIES = [
     label: 'Potholes & Road Damage',
     department: 'Roads & Public Works Department (PWD) / Municipal Roads Department',
   },
-  {
-    id: 'traffic_signal_malfunction',
-    label: 'Traffic Signal Malfunction',
-    department: 'Traffic Police / Traffic Management Department',
-  },
-  {
-    id: 'non_functional_streetlights',
-    label: 'Non-functional Streetlights',
-    department: 'Electrical Department / Street Lighting Department',
-  },
-  {
-    id: 'water_leakage',
-    label: 'Water Leakage',
-    department: 'Water Supply Department',
-  },
-  {
-    id: 'garbage_overflow',
-    label: 'Garbage Overflow',
-    department: 'Sanitation Department / Solid Waste Management',
-  },
-  {
-    id: 'drainage_blockage',
-    label: 'Drainage Blockage',
-    department: 'Drainage / Sewage Department',
-  },
-  {
-    id: 'public_toilet_issue',
-    label: 'Public Toilet Issue',
-    department: 'Sanitation / Public Health Department',
-  },
-  {
-    id: 'tree_trimming',
-    label: 'Tree Trimming / Park Maintenance',
-    department: 'Parks & Horticulture Department',
-  },
-  {
-    id: 'building_safety',
-    label: 'Building Safety Concern',
-    department: 'Municipal Building Department',
-  },
-  {
-    id: 'streetlight_failure',
-    label: 'Streetlight Failure',
-    department: 'Electrical Department / Street Lighting Department',
-  },
-  {
-    id: 'other',
-    label: 'Other',
-    department: 'General Municipal Services',
-  },
 ]
 
 export const CATEGORY_DEPARTMENTS = ISSUE_CATEGORIES.reduce((map, category) => {

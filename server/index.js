@@ -16,8 +16,8 @@ import configRoutes from './routes/config.js'
 import chatRoutes from './routes/chat.js'
 import uploadRoutes from './routes/uploads.js'
 import notificationRoutes from './routes/notifications.js'
-import userNotificationRoutes from './routes/userNotifications.js'
 import adminRoutes from './routes/admin.js'
+import syncRoutes from './routes/sync.js'
 import { initializeCleanupJobs } from './utils/cleanup.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -76,15 +76,14 @@ app.use('/api/chat', chatRoutes)
 app.use('/api/uploads', uploadRoutes)
 app.use('/api/issues', issueRoutes)
 app.use('/api/notifications', notificationRoutes)
-app.use('/api/user-notifications', userNotificationRoutes)
+app.use('/api/user-notifications', notificationRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/sync', syncRoutes)
 
 async function start() {
   try {
     await connectDB(process.env.MONGODB_URI)
-    if (process.env.SEED_DATABASE === 'true') {
-      await seedDatabase()
-    }
+    await seedDatabase()
     initializeCleanupJobs()
     app.listen(PORT, () => {
       console.log(`CivicPulse API running on http://localhost:${PORT}`)

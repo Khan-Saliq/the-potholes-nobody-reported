@@ -21,12 +21,11 @@ export function ProtectedRoute({
 
   if (!user) return <Navigate to="/login" replace />
   if (role) {
-    const allowed =
-      role === 'admin'
-        ? user.role === 'admin' || user.role === 'department_admin'
-        : user.role === role
+    const allowed = user.role === role
     if (!allowed) {
-      return <Navigate to={user.role === 'admin' || user.role === 'department_admin' ? '/admin' : '/dashboard'} replace />
+      if (user.role === 'contractor') return <Navigate to="/contractor/dashboard" replace />
+      if (user.role === 'admin') return <Navigate to="/admin" replace />
+      return <Navigate to="/dashboard" replace />
     }
   }
 

@@ -1,5 +1,5 @@
 import { apiFetch, fixImageUrl } from './api'
-import type { Issue, IssueCategory, IssueStatus, ValidationResult } from '../types'
+import type { Issue, IssueCategory, IssueStatus, ValidationResult, User, ContractorReportResponse } from '../types'
 
 export async function exportIssues(filters: Record<string, any>): Promise<Blob> {
   const token = localStorage.getItem('civicpulse_token')
@@ -119,6 +119,20 @@ export async function findDuplicateCandidates(
   }))
 }
 
+export async function checkDuplicatesNearby(lat: number, lng: number): Promise<{ hasDuplicates: boolean; candidates: Issue[] }> {
+  const result = await apiFetch<{ hasDuplicates: boolean; candidates: Issue[] }>('/issues/check-duplicates', {
+    method: 'POST',
+    body: JSON.stringify({ lat, lng }),
+  })
+  return {
+    hasDuplicates: result.hasDuplicates,
+    candidates: result.candidates.map(issue => ({
+      ...issue,
+      imageUrl: issue.imageUrl ? fixImageUrl(issue.imageUrl) : undefined
+    }))
+  }
+}
+
 export async function createIssue(data: {
   title: string
   description: string
@@ -128,6 +142,7 @@ export async function createIssue(data: {
   area?: string
   imageUrl?: string
   mergeWithId?: string
+  beforeGps?: { lat: number; lng: number }
 }): Promise<Issue> {
   const issue = await apiFetch<Issue>('/issues', {
     method: 'POST',
@@ -151,6 +166,96 @@ export async function updateIssueStatus(id: string, status: IssueStatus): Promis
   })
 }
 
+export async function assignContractor(
+  id: string,
+  contractorId: string,
+  contractorName: string,
+  deadlineHours?: number,
+  overrideCapacity?: boolean
+): Promise<Issue> {
+  return apiFetch<Issue>(`/issues/${id}/assign-contractor`, {
+    method: 'POST',
+    body: JSON.stringify({ contractorId, contractorName, deadlineHours, overrideCapacity }),
+  })
+}
+
+export async function updateContractorStatus(id: string, status: 'accepted' | 'repair_in_progress'): Promise<Issue> {
+  return apiFetch<Issue>(`/issues/${id}/contractor-status`, {
+    method: 'POST',
+    body: JSON.stringify({ status }),
+  })
+}
+
+export async function submitRepairEvidence(
+  id: string,
+  afterImage: string,
+  afterGps?: { lat: number; lng: number }
+): Promise<Issue> {
+  return apiFetch<Issue>(`/issues/${id}/submit-repair`, {
+    method: 'POST',
+    body: JSON.stringify({ afterImage, afterGps }),
+  })
+}
+
+export async function reviewRepairVerification(
+  id: string,
+  action: 'approve' | 'reject',
+  notes?: string
+): Promise<Issue> {
+  return apiFetch<Issue>(`/issues/${id}/review-repair`, {
+    method: 'POST',
+    body: JSON.stringify({ action, notes }),
+  })
+}
+
+export async function getContractorTasks(): Promise<Issue[]> {
+  const issues = await apiFetch<Issue[]>('/issues/contractor/my-tasks')
+  return issues.map(issue => ({
+    ...issue,
+    imageUrl: issue.imageUrl ? fixImageUrl(issue.imageUrl) : undefined,
+    afterImage: issue.afterImage ? fixImageUrl(issue.afterImage) : undefined,
+  }))
+}
+
+export async function getContractors() {
+  return apiFetch<User[]>('/admin/contractors')
+}
+
+export async function getContractorAnalytics() {
+  return apiFetch<{
+    summary: {
+      totalContractors: number
+      totalAssignedTasks: number
+      totalVerifiedRepairs: number
+      totalSuspicious: number
+      totalRecurringPotholes: number
+    }
+    contractors: Array<{
+      contractorId: string
+      name: string
+      email: string
+      companyName: string
+      assignedDepartment: string
+      rating: number
+      totalAssigned: number
+      completedRepairs: number
+      inProgress: number
+      awaitingVerification: number
+      suspiciousSubmissions: number
+      slaBreached: number
+      slaComplianceRate: number
+      avgRepairTimeHours: number
+    }>
+    recurringPotholes: Issue[]
+  }>('/admin/contractor-analytics')
+}
+
+export async function seedDemoScenarios() {
+  return apiFetch<{ success: boolean; message: string; complaints: Issue[] }>('/admin/seed-demo-scenarios', {
+    method: 'POST',
+  })
+}
+
 export async function validateIssue(id: string, result?: ValidationResult) {
   return apiFetch<{
     issue: Issue
@@ -160,6 +265,101 @@ export async function validateIssue(id: string, result?: ValidationResult) {
   }>(`/issues/${id}/validate`, {
     method: 'POST',
     body: JSON.stringify(result ? { result } : {}),
+  })
+}
+
+export async function getContractorWorkReport(params?: {
+  contractorId?: string
+  fromDate?: string
+  toDate?: string
+  status?: string
+}): Promise<ContractorReportResponse> {
+  const cleanParams: Record<string, string> = {}
+  if (params?.contractorId) cleanParams.contractorId = params.contractorId
+  if (params?.fromDate) cleanParams.fromDate = params.fromDate
+  if (params?.toDate) cleanParams.toDate = params.toDate
+  if (params?.status) cleanParams.status = params.status
+
+  const qs = new URLSearchParams(cleanParams).toString()
+  return apiFetch<ContractorReportResponse>(`/admin/contractor-reports${qs ? `?${qs}` : ''}`)
+}
+
+export async function exportContractorWorkReport(filters: {
+  contractorId?: string
+  fromDate?: string
+  toDate?: string
+  status?: string
+}): Promise<void> {
+  const token = localStorage.getItem('civicpulse_token')
+  const response = await fetch('/api/admin/contractor-reports/export', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(filters),
+  })
+
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => ({ error: 'Export failed' }))
+    throw new Error(errorData.error || 'Failed to export contractor work report')
+  }
+
+  const blob = await response.blob()
+  const url = window.URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = `Contractor_Work_Report_${new Date().toISOString().split('T')[0]}.xlsx`
+  document.body.appendChild(a)
+  a.click()
+  window.URL.revokeObjectURL(url)
+  document.body.removeChild(a)
+}
+
+export interface PotholeAnalysisResult {
+  success: boolean
+  isPothole: boolean
+  confidence: number
+  severity: string
+  suggestedSeverity: number
+  imageQuality: string
+  clearEnough: boolean
+  isAiGenerated: boolean
+  reason: string
+  status: 'ACCEPTED' | 'REJECTED'
+  message: string
+  analyzedBy: string
+}
+
+export async function analyzePotholePhoto(image: string): Promise<PotholeAnalysisResult> {
+  return apiFetch<PotholeAnalysisResult>('/issues/analyze-pothole-photo', {
+    method: 'POST',
+    body: JSON.stringify({ image }),
+  })
+}
+
+export interface AISmartReportPayload {
+  photo: string
+  lat?: number | null
+  lng?: number | null
+  gpsAccuracy?: number | null
+  timestamp?: string
+  description?: string
+  operationId?: string
+}
+
+export interface AISmartReportResult {
+  decision: 'AUTO_ACCEPT' | 'AUTO_REJECT' | 'NEEDS_REVIEW' | 'POSSIBLE_DUPLICATE'
+  message: string
+  issue?: Issue
+  existingIssue?: Issue
+  aiDecisionRecord?: any
+}
+
+export async function submitAISmartReport(payload: AISmartReportPayload): Promise<AISmartReportResult> {
+  return apiFetch<AISmartReportResult>('/issues/ai-smart-report', {
+    method: 'POST',
+    body: JSON.stringify(payload),
   })
 }
 
@@ -175,3 +375,18 @@ export async function getStats(params?: Record<string, string>) {
     manipulated: number
   }>(`/issues/stats${qs}`)
 }
+
+export async function clearAllIssues(): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>('/issues/clear-all', {
+    method: 'DELETE',
+  })
+}
+
+export async function deleteIssue(id: string): Promise<{ message: string }> {
+  return apiFetch<{ message: string }>(`/issues/${id}`, {
+    method: 'DELETE',
+  })
+}
+
+
+

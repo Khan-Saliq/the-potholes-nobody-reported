@@ -68,8 +68,8 @@ export function UserDashboard() {
               <div className="lg:col-span-2">
                 <div className="mb-4 flex items-center justify-between">
                   <h2 className="text-lg font-semibold text-slate-100">High Priority Nearby</h2>
-                  <Link to="/nearby" className="text-sm font-medium text-cyan-400 transition hover:text-cyan-300">
-                    View all →
+                  <Link to="/map" className="text-sm font-medium text-cyan-400 transition hover:text-cyan-300">
+                    View on Pothole Map →
                   </Link>
                 </div>
                 <div className="space-y-4">

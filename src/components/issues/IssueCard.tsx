@@ -4,7 +4,6 @@ import type { Issue } from '../../types'
 import { StatusBadge } from '../ui/StatusBadge'
 import { PriorityBar } from '../ui/PriorityBar'
 import { Badge } from '../ui/Badge'
-import { useConfig } from '../../context/ConfigContext'
 import { fixImageUrl } from '../../services/api'
 
 const validationVariant: Record<string, 'green' | 'amber' | 'red' | 'default'> = {
@@ -14,7 +13,9 @@ const validationVariant: Record<string, 'green' | 'amber' | 'red' | 'default'> =
   pending: 'default',
 }
 
-export function IssueCard({
+import { memo } from 'react'
+
+export const IssueCard = memo(function IssueCard({
   issue,
   adminLink,
   delay = 0,
@@ -23,9 +24,6 @@ export function IssueCard({
   adminLink?: boolean
   delay?: number
 }) {
-  const { config } = useConfig()
-  const categoryLabel =
-    config?.categories.find((c) => c.id === issue.category)?.label ?? issue.category
   const to = adminLink ? `/admin/issues/${issue.id}` : `/my-issues#${issue.id}`
 
   return (
@@ -37,7 +35,6 @@ export function IssueCard({
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="teal">{categoryLabel}</Badge>
             <StatusBadge status={issue.status} />
             <Badge variant={validationVariant[issue.validationResult]}>
               {issue.validationResult}
@@ -81,4 +78,4 @@ export function IssueCard({
       </div>
     </Link>
   )
-}
+})

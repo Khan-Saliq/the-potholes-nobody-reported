@@ -1,35 +1,48 @@
-import { useEffect, useState, useRef } from 'react'
+import React, { useEffect, useState, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { AlertCircle, Camera, MapPin, Loader } from 'lucide-react'
+import { AlertCircle, Camera, MapPin, Loader, CheckCircle2, XCircle, ShieldCheck, Sparkles } from 'lucide-react'
 import { Layout } from '../../components/layout/Layout'
 import { AnimatedPage } from '../../components/ui/AnimatedPage'
 import { useAuth } from '../../context/AuthContext'
-import { useConfig } from '../../context/ConfigContext'
-import { useIssues } from '../../context/IssueContext'
+import { useToast } from '../../context/ToastContext'
 import { useGeolocation } from '../../hooks/useGeolocation'
-import { findDuplicateCandidates } from '../../services/issueService'
-import { uploadImage } from '../../services/uploadService'
+import {
+  findDuplicateCandidates,
+  analyzePotholePhoto,
+  submitAISmartReport,
+  type PotholeAnalysisResult,
+  type AISmartReportResult,
+} from '../../services/issueService'
 import { getFormattedArea } from '../../utils/geocoding'
+import { generateUUID, generateTempComplaintCode, generateTempId, compressImageIfNeeded } from '../../utils/offlineHelpers'
+import { saveOfflineQueueItem, updateCachedIssue, type OfflineQueueItem } from '../../services/offlineStorage'
+import { triggerSync } from '../../services/offlineSyncEngine'
 import type { Issue, IssueCategory } from '../../types'
 
-// Report Issue Page - Citizen complaint submission with photo capture
+// Citizen Pothole Complaint Submission Page with Live AI Photo Scanning & Pre-Verification
 
 export function ReportIssue() {
   const { user } = useAuth()
-  const { config } = useConfig()
-  const { createIssue } = useIssues()
+  const { toast } = useToast()
   const geo = useGeolocation()
   const navigate = useNavigate()
 
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
-  const [category, setCategory] = useState<IssueCategory>('potholes_and_road_damage')
+  // Lock category strictly to Potholes & Road Damage
+  const category: IssueCategory = 'potholes_and_road_damage'
   const [severity, setSeverity] = useState(3)
   const [address, setAddress] = useState('')
   const [lat, setLat] = useState<number | null>(null)
   const [lng, setLng] = useState<number | null>(null)
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
+  
+  // Live Photo Scanning & AI Analysis States
+  const [isScanning, setIsScanning] = useState(false)
+  const [aiResult, setAiResult] = useState<PotholeAnalysisResult | null>(null)
+  const [smartOutcome, setSmartOutcome] = useState<AISmartReportResult | null>(null)
+
   const [mergeWithId, setMergeWithId] = useState<string | null>(null)
   const [duplicates, setDuplicates] = useState<Issue[]>([])
   const [submitted, setSubmitted] = useState(false)
@@ -42,25 +55,23 @@ export function ReportIssue() {
     if (geo.lat != null && geo.lng != null) {
       setLat(geo.lat)
       setLng(geo.lng)
-      // Automatically fetch area name from coordinates
-      if (!address) {
-        getFormattedArea(geo.lat, geo.lng).then(area => {
-          setAddress(area)
-        })
+      if (!address || address === 'Detecting location...') {
+        if (navigator.onLine) {
+          getFormattedArea(geo.lat, geo.lng).then((area) => {
+            setAddress(area)
+          })
+        } else {
+          setAddress(`${geo.lat.toFixed(6)}, ${geo.lng.toFixed(6)}`)
+        }
       }
     }
   }, [geo.lat, geo.lng])
 
-  useEffect(() => {
-    if (config?.categories.length && !config.categories.find((c) => c.id === category)) {
-      setCategory(config.categories[0].id as IssueCategory)
-    }
-  }, [config])
-
   const checkDuplicates = async () => {
-    if (title.length > 5 && lat != null && lng != null) {
+    if (lat != null && lng != null && navigator.onLine) {
       try {
-        setDuplicates(await findDuplicateCandidates(title, lat, lng))
+        const result = await findDuplicateCandidates(title || 'pothole', lat, lng)
+        setDuplicates(result)
       } catch {
         setDuplicates([])
       }
@@ -69,66 +80,34 @@ export function ReportIssue() {
 
   const validateForm = () => {
     setFormError(null)
-    const validCategories = (config?.categories ?? []).map((c) => c.id)
-    if (!validCategories.length) {
-      // fallback to known categories in case config hasn't loaded yet
-      validCategories.push(
-        'potholes_and_road_damage',
-        'traffic_signal_malfunction',
-        'non_functional_streetlights',
-        'water_leakage',
-        'garbage_overflow',
-        'drainage_blockage',
-        'public_toilet_issue',
-        'tree_trimming',
-        'building_safety',
-        'other'
-      )
-    }
 
-    if (!title || title.trim().length < 5) return 'Title must be at least 5 characters.'
-    if (!description || description.trim().length < 10) return 'Description must be at least 10 characters.'
-    if (!validCategories.includes(category)) return `Invalid category selected.`
-    if (!Number.isFinite(lat as number) || !Number.isFinite(lng as number)) return 'Latitude and longitude must be valid numbers.'
-    if (!address || !address.trim()) return 'Address is required.'
-    if (typeof severity !== 'number' || severity < 1 || severity > 5) return 'Severity must be between 1 and 5.'
+    if (!imageFile) return 'Upload a valid proof: Pothole photo proof is required.'
+    if (aiResult?.status === 'REJECTED') {
+      return `Upload a valid proof: ${aiResult.reason || 'Photo did not match clear road pothole features.'}`
+    }
     return null
   }
 
-  const refreshLocation = () => {
-    if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your browser.')
-      return
-    }
-
+  const refreshLocation = async () => {
     setLocationRefreshing(true)
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLat(pos.coords.latitude)
-        setLng(pos.coords.longitude)
-        setAddress(`${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`)
-        setLocationRefreshing(false)
-      },
-      (err) => {
-        alert(`Failed to get location: ${err.message}`)
-        setLocationRefreshing(false)
-      },
-      { enableHighAccuracy: true, timeout: 10000 }
-    )
-  }
+    const result = await geo.refreshLocation()
+    setLocationRefreshing(false)
 
-  const handleImage = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) {
-      setImageFile(file)
-      setImagePreview(URL.createObjectURL(file))
-    }
-  }
-
-  const triggerImageInput = () => {
-    // Trigger the hidden camera input
-    if (cameraInputRef.current) {
-      cameraInputRef.current.click()
+    if (result.lat != null && result.lng != null) {
+      setLat(result.lat)
+      setLng(result.lng)
+      const addrString = `${result.lat.toFixed(6)}, ${result.lng.toFixed(6)}`
+      setAddress(addrString)
+      toast.success(
+        '📡 Device GPS Captured',
+        `Lat: ${result.lat.toFixed(6)}, Lng: ${result.lng.toFixed(6)}${result.accuracy ? ` (Accuracy: ±${result.accuracy}m)` : ''}`
+      )
+      if (navigator.onLine) {
+        getFormattedArea(result.lat, result.lng).then((area) => setAddress(area)).catch(() => {})
+        findDuplicateCandidates('pothole', result.lat, result.lng).then(setDuplicates).catch(() => {})
+      }
+    } else {
+      toast.error('GPS Signal Failure', result.error || 'Unable to acquire device GPS coordinates.')
     }
   }
 
@@ -140,6 +119,181 @@ export function ReportIssue() {
       reader.readAsDataURL(file)
     })
 
+  const saveOfflineReport = async (reason?: string) => {
+    if (!user) return
+    try {
+      console.log('🌐 Saving citizen report offline to IndexedDB queue. Reason:', reason || 'offline mode')
+      const operationId = generateUUID()
+      const tempId = generateTempId()
+      const tempCode = generateTempComplaintCode()
+      const deviceCapturedAt = new Date().toISOString()
+
+      const compressedBlob = imageFile
+        ? await compressImageIfNeeded(imageFile)
+        : new Blob([], { type: 'image/jpeg' })
+
+      const queueItem: OfflineQueueItem = {
+        operationId,
+        userId: user.id,
+        userRole: 'citizen',
+        actionType: 'CREATE_CITIZEN_REPORT',
+        entityType: 'issue',
+        entityId: tempCode,
+        payload: {
+          title: title?.trim() || 'Pothole Road Damage',
+          description: description?.trim() || 'Offline Pothole Report',
+          category,
+          severity,
+          location: { lat: Number(lat || 25.578321), lng: Number(lng || 91.893421), address: (address || 'Captured Location').trim() },
+          area: (address || 'Captured Location').trim(),
+          beforeGps: { lat: Number(lat || 25.578321), lng: Number(lng || 91.893421) },
+          mergeWithId: mergeWithId || undefined,
+        },
+        photoBlob: compressedBlob,
+        photoMetadata: {
+          fileName: imageFile?.name || 'pothole_proof.jpg',
+          mimeType: imageFile?.type || 'image/jpeg',
+          size: compressedBlob.size,
+          capturedAt: deviceCapturedAt,
+        },
+        location: {
+          latitude: Number(lat || 25.578321),
+          longitude: Number(lng || 91.893421),
+          address: (address || 'Captured Location').trim(),
+        },
+        capturedAt: deviceCapturedAt,
+        createdAt: deviceCapturedAt,
+        status: 'WAITING_FOR_SYNC',
+        retryCount: 0,
+      }
+
+      await saveOfflineQueueItem(queueItem)
+
+      const tempIssue = {
+        id: tempId,
+        complaintId: tempCode,
+        title: title?.trim() || 'Pothole Road Damage',
+        description: description?.trim() || 'Offline Pothole Report',
+        category,
+        severity,
+        status: 'reported' as const,
+        isOffline: true,
+        syncStatus: 'WAITING_FOR_SYNC' as const,
+        location: { lat: Number(lat || 25.578321), lng: Number(lng || 91.893421), address: (address || 'Captured Location').trim() },
+        imageUrl: imagePreview || undefined,
+        reporterId: user.id,
+        reporterName: user.name,
+        createdAt: deviceCapturedAt,
+        updatedAt: deviceCapturedAt,
+      }
+      await updateCachedIssue(tempIssue)
+
+      setSubmitted(true)
+      toast.info(
+        '📌 Report Saved Offline',
+        'Your report, photo proof, and GPS location are safely stored on this device. It will be uploaded automatically when internet returns.'
+      )
+
+      triggerSync().catch(() => {})
+      setTimeout(() => navigate('/my-issues'), 1500)
+    } catch (offlineErr: any) {
+      setFormError(`Failed to save report offline: ${offlineErr.message}`)
+      toast.error('Offline Save Error', 'Could not access local device storage.')
+    }
+  }
+
+  // Execute Zero-Touch Auto-Submission / Auto-Rejection upon photo upload
+  const processAutoReportSubmission = async (file: File) => {
+    if (!user) return
+
+    setSubmitting(true)
+    setIsScanning(true)
+    setFormError(null)
+    setSmartOutcome(null)
+    setAiResult(null)
+
+    try {
+      const base64 = await fileToBase64(file)
+
+      // Live Pre-Verification for UI HUD Status feedback
+      const visionResult = await analyzePotholePhoto(base64).catch(() => null)
+      if (visionResult) {
+        setAiResult(visionResult)
+        if (visionResult.suggestedSeverity) setSeverity(visionResult.suggestedSeverity)
+      }
+
+      // Check if device is offline upfront
+      if (!navigator.onLine) {
+        await saveOfflineReport('Device is currently offline')
+        return
+      }
+
+      console.log('🤖 Zero-Touch 6-Agent AI Pipeline starting for photo upload...')
+      const smartResult = await submitAISmartReport({
+        photo: base64,
+        lat: lat != null ? Number(lat) : null,
+        lng: lng != null ? Number(lng) : null,
+        gpsAccuracy: geo.accuracy || null,
+        timestamp: new Date().toISOString(),
+        description: description?.trim() || title?.trim() || undefined,
+        operationId: generateUUID(),
+      })
+
+      setSmartOutcome(smartResult)
+
+      if (smartResult.decision === 'AUTO_ACCEPT') {
+        setSubmitted(true)
+        toast.success(
+          '🚀 AI Auto-Verified & Submitted!',
+          smartResult.message || 'Pothole verified by 6 AI agents! Auto-assigned to contractor.'
+        )
+        setTimeout(() => navigate('/my-issues'), 2200)
+      } else if (smartResult.decision === 'NEEDS_REVIEW') {
+        setSubmitted(true)
+        toast.info(
+          '🔎 Sent to Admin Review Queue',
+          smartResult.message || 'Pothole logged and queued for quick admin confirmation.'
+        )
+        setTimeout(() => navigate('/my-issues'), 2200)
+      } else if (smartResult.decision === 'POSSIBLE_DUPLICATE') {
+        setSubmitted(true)
+        toast.warning(
+          '🔁 Duplicate Report Detected',
+          smartResult.message || 'Similar complaint exists nearby. Your report has upvoted it.'
+        )
+        setTimeout(() => navigate('/my-issues'), 2200)
+      } else if (smartResult.decision === 'AUTO_REJECT') {
+        setSubmitted(false)
+        setFormError(`❌ Auto-Rejected by AI: ${smartResult.message}`)
+        toast.error('❌ Photo Auto-Rejected', smartResult.message || 'Photo did not match clear road pothole features.')
+      }
+    } catch (err: any) {
+      console.warn('Network submission failed, falling back to IndexedDB offline storage:', err.message)
+      await saveOfflineReport(err.message)
+    } finally {
+      setIsScanning(false)
+      setSubmitting(false)
+    }
+  }
+
+  // Handle Photo Selection & Trigger Zero-Touch Auto-Submission / Auto-Rejection
+  const handleImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (file) {
+      setImageFile(file)
+      const previewUrl = URL.createObjectURL(file)
+      setImagePreview(previewUrl)
+      // Automatically trigger zero-touch report submission/rejection!
+      await processAutoReportSubmission(file)
+    }
+  }
+
+  const triggerImageInput = () => {
+    if (cameraInputRef.current) {
+      cameraInputRef.current.click()
+    }
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!user) return
@@ -150,55 +304,85 @@ export function ReportIssue() {
       return
     }
 
-    setSubmitting(true)
-    try {
-      let imageUrl: string | undefined
-      if (imageFile) {
-        const base64 = await fileToBase64(imageFile)
-        imageUrl = await uploadImage(base64, imageFile.name)
-      }
-
-      const payload = {
-        title,
-        description,
-        category,
-        severity,
-        location: { lat: Number(lat), lng: Number(lng), address: address.trim() },
-        area: address.trim(),
-        imageUrl,
-        mergeWithId: mergeWithId || undefined,
-      }
-      console.log('Submitting issue payload:', payload)
-      await createIssue(payload)
-
-      setSubmitted(true)
-      setTimeout(() => navigate('/my-issues'), 1500)
-    } catch {
-      alert('Failed to submit issue. Ensure the API server is running.')
-    } finally {
-      setSubmitting(false)
+    if (imageFile) {
+      await processAutoReportSubmission(imageFile)
     }
   }
-
-  const categories = config?.categories ?? []
 
   return (
     <Layout>
       <AnimatedPage>
         <h1 className="text-2xl font-bold text-slate-100">
-          Report an <span className="text-gradient">Issue</span>
+          Report a <span className="text-gradient">Pothole Complaint</span>
         </h1>
-        <p className="mt-1 text-slate-400">Submit with location and image proof. We&apos;ll check for duplicates.</p>
+        <p className="mt-1 text-slate-400">
+          Capture or upload a pothole image for instant AI auto-verification and location tracking.
+        </p>
 
-        {geo.loading && <p className="mt-2 text-sm text-slate-500">📍 Detecting your location...</p>}
-        {geo.error && <p className="mt-2 text-sm text-amber-400">⚠️ Location unavailable — enter coordinates manually or use the refresh button.</p>}
-        {!geo.loading && !geo.error && lat != null && lng != null && (
-          <p className="mt-2 text-sm text-emerald-400">✅ Location auto-filled from your current position</p>
+        {geo.loading && (
+          <div className="mt-3 p-3 rounded-xl border border-cyan-500/20 bg-cyan-500/5 text-cyan-300 text-xs flex items-center gap-2 font-mono">
+            <Loader className="w-4 h-4 animate-spin text-cyan-400" />
+            <span>📡 Acquiring device GNSS GPS signal...</span>
+          </div>
         )}
 
-        {submitted && (
+        {geo.error && (
+          <div className="mt-3 p-3 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-300 text-xs flex items-center justify-between gap-2">
+            <span>⚠️ {geo.error}</span>
+            <button
+              type="button"
+              onClick={refreshLocation}
+              className="px-2.5 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 font-bold text-xs transition cursor-pointer"
+            >
+              📡 Retry GPS
+            </button>
+          </div>
+        )}
+
+        {!geo.loading && !geo.error && lat != null && lng != null && (
+          <div className="mt-3 p-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-300 text-xs space-y-1">
+            <div className="flex items-center justify-between font-mono font-bold">
+              <span>✅ Device GPS Detected: Lat {lat.toFixed(6)}, Lng {lng.toFixed(6)} {geo.accuracy ? `(Accuracy: ±${geo.accuracy} m)` : ''}</span>
+              <span className="text-[10px] text-cyan-300 bg-cyan-500/20 px-2 py-0.5 rounded border border-cyan-500/30">
+                {navigator.onLine ? 'GNSS Online' : '📡 Offline Device GNSS Active'}
+              </span>
+            </div>
+            {!navigator.onLine && (
+              <p className="text-[11px] text-slate-300 font-sans">
+                Location acquired directly from device GNSS hardware. Coordinates will be safely saved offline and uploaded when internet returns.
+              </p>
+            )}
+          </div>
+        )}
+
+        {smartOutcome && (
+          <div
+            className={`animate-scale-in mt-4 rounded-xl border p-4 space-y-2 text-sm ${
+              smartOutcome.decision === 'AUTO_ACCEPT'
+                ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-200'
+                : smartOutcome.decision === 'POSSIBLE_DUPLICATE'
+                ? 'border-cyan-500/40 bg-cyan-500/10 text-cyan-200'
+                : smartOutcome.decision === 'NEEDS_REVIEW'
+                ? 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+                : 'border-rose-500/40 bg-rose-500/10 text-rose-200'
+            }`}
+          >
+            <div className="flex items-center justify-between font-bold">
+              <span className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-cyan-400" />
+                <span>AI Agent Decision: {smartOutcome.decision}</span>
+              </span>
+              <span className="text-xs px-2.5 py-0.5 rounded-full bg-slate-900 border border-white/10 font-mono">
+                {smartOutcome.issue?.complaintId || 'PT-2026-REPORT'}
+              </span>
+            </div>
+            <p className="text-xs text-slate-300">{smartOutcome.message}</p>
+          </div>
+        )}
+
+        {submitted && !smartOutcome && (
           <div className="animate-scale-in mt-4 rounded-xl border border-emerald-500/30 bg-emerald-500/10 px-4 py-3 text-emerald-300">
-            Issue submitted successfully! Redirecting...
+            Pothole complaint submitted successfully! Redirecting...
           </div>
         )}
 
@@ -209,77 +393,36 @@ export function ReportIssue() {
         )}
 
         <form onSubmit={handleSubmit} className="mt-6 grid gap-6 lg:grid-cols-2">
-          <div className="glass-card space-y-4 p-6">
+          <div className="glass-card space-y-5 p-6">
+            {/* 1. One-Tap Photo Upload & Live AI Computer Vision Scanning */}
             <div>
-              <label className="mb-1 block text-sm font-medium text-slate-400">Title</label>
-              <input required value={title} onChange={(e) => setTitle(e.target.value)} onBlur={checkDuplicates} className="input-dark" />
-            </div>
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-400">Description</label>
-              <textarea required rows={4} value={description} onChange={(e) => setDescription(e.target.value)} className="input-dark resize-none" />
-            </div>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-400">Category</label>
-                <select value={category} onChange={(e) => setCategory(e.target.value as IssueCategory)} className="input-dark">
-                  {categories.map((c) => (
-                    <option key={c.id} value={c.id} className="bg-slate-900">{c.label}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="mb-1 block text-sm font-medium text-slate-400">Severity: <span className="text-cyan-400">{severity}</span></label>
-                <input type="range" min={1} max={5} value={severity} onChange={(e) => setSeverity(Number(e.target.value))} className="w-full accent-cyan-500" />
-              </div>
-            </div>
-            <div>
-              <label className="mb-1 flex items-center justify-between text-sm font-medium text-slate-400">
-                <span className="flex items-center gap-1">
-                  <MapPin className="h-4 w-4 text-violet-400" /> Location
+              <label className="mb-2 flex items-center justify-between text-sm font-bold text-slate-200">
+                <span className="flex items-center gap-1.5 text-cyan-300">
+                  <Camera className="h-5 w-5 text-cyan-400" /> One-Tap Pothole Photo Proof
                 </span>
-                <button
-                  type="button"
-                  onClick={refreshLocation}
-                  disabled={locationRefreshing}
-                  className="text-xs text-cyan-400 hover:text-cyan-300 disabled:opacity-50 transition flex items-center gap-1"
-                  title="Refresh your current location"
-                >
-                  {locationRefreshing ? (
-                    <>
-                      <Loader className="h-3 w-3 animate-spin" /> Detecting...
-                    </>
-                  ) : (
-                    <>📍 Refresh</>
-                  )}
-                </button>
+                <span className="text-[10px] text-cyan-400 font-mono bg-cyan-500/10 px-2 py-0.5 rounded border border-cyan-500/30">
+                  ⚡ Live AI Verification
+                </span>
               </label>
-              <input required value={address} onChange={(e) => setAddress(e.target.value)} className="input-dark mb-2" placeholder="Street address or area name" />
-              <div className="grid grid-cols-2 gap-2">
-                <input type="number" step="0.0001" required value={lat ?? ''} onChange={(e) => setLat(Number(e.target.value))} className="input-dark text-sm" placeholder="Latitude" />
-                <input type="number" step="0.0001" required value={lng ?? ''} onChange={(e) => setLng(Number(e.target.value))} className="input-dark text-sm" placeholder="Longitude" />
-              </div>
-            </div>
-            <div>
-              <label className="mb-1 flex items-center gap-1 text-sm font-medium text-slate-400">
-                <Camera className="h-4 w-4 text-cyan-400" /> Image Proof
-              </label>
+
               <div className="space-y-3">
                 <div className="flex gap-2">
                   <button
                     type="button"
                     onClick={triggerImageInput}
-                    className="flex-1 rounded-lg border border-cyan-500/30 bg-cyan-500/10 px-4 py-2 text-sm font-medium text-cyan-300 transition hover:bg-cyan-500/15"
+                    className="flex-1 rounded-xl border border-cyan-500/40 bg-cyan-500/20 px-4 py-3 text-sm font-bold text-cyan-200 transition hover:bg-cyan-500/30 flex items-center justify-center gap-2 cursor-pointer shadow-lg shadow-cyan-500/10"
                   >
-                    📷 Take Photo
+                    <Camera className="w-5 h-5 text-cyan-300" /> 📷 Take Photo / Upload Pothole Proof
                   </button>
                   <input
                     type="file"
                     accept="image/*"
                     onChange={handleImage}
-                    className="flex-1 text-sm text-slate-400 file:mr-3 file:rounded-lg file:border-0 file:bg-cyan-500/20 file:px-3 file:py-1.5 file:text-cyan-300"
+                    className="hidden"
                   />
                 </div>
-                {/* Hidden camera input for mobile */}
+
+                {/* Hidden camera capture input */}
                 <input
                   ref={cameraInputRef}
                   type="file"
@@ -288,14 +431,226 @@ export function ReportIssue() {
                   onChange={handleImage}
                   className="hidden"
                 />
-                {imagePreview && <img src={imagePreview} alt="Preview" className="mt-2 h-32 animate-scale-in rounded-xl object-cover ring-2 ring-cyan-500/30" />}
+
+                {/* Live Scanning Image Preview & Output Display */}
+                {imagePreview && (
+                  <div className="relative mt-3 rounded-2xl overflow-hidden border border-cyan-500/30 bg-slate-950 shadow-2xl transition-all">
+                    {/* Uploaded Photo Image — Always Fully Visible during AI Scanning */}
+                    <div className={`relative h-64 w-full overflow-hidden ${isScanning ? 'scanning-container' : ''}`}>
+                      <img
+                        src={imagePreview}
+                        alt="Pothole Preview"
+                        className={`h-full w-full object-cover transition-all duration-500 ${
+                          isScanning ? 'brightness-110 contrast-125' : 'brightness-100'
+                        }`}
+                      />
+
+                      {/* Transparent Cybernetic HUD Target Bounding Box Overlay */}
+                      <div className="absolute inset-0 pointer-events-none p-3 flex flex-col justify-between">
+                        {/* Top HUD Brackets */}
+                        <div className="flex justify-between items-center text-cyan-400/80 font-mono text-[10px]">
+                          <span className="border-t-2 border-l-2 border-cyan-400 w-6 h-6 rounded-tl-md"></span>
+                          <span className="bg-slate-950/80 px-2 py-0.5 rounded border border-cyan-500/40 text-cyan-300 font-bold backdrop-blur-md">
+                            {isScanning ? '⚡ AI PREVIEW SCAN ACTIVE' : aiResult ? `AI STATUS: ${aiResult.status}` : 'PROOF UPLOADED'}
+                          </span>
+                          <span className="border-t-2 border-r-2 border-cyan-400 w-6 h-6 rounded-tr-md"></span>
+                        </div>
+
+                        {/* Center Target Reticle while Scanning */}
+                        {isScanning && (
+                          <div className="absolute inset-0 flex items-center justify-center">
+                            <div className="w-28 h-28 border border-dashed border-cyan-400/60 rounded-full animate-spin duration-3000 flex items-center justify-center">
+                              <div className="w-16 h-16 border border-cyan-400/40 rounded-full flex items-center justify-center">
+                                <Sparkles className="w-6 h-6 text-cyan-400 animate-pulse" />
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Bottom HUD Brackets & Live Status Bar */}
+                        <div className="flex justify-between items-end">
+                          <span className="border-b-2 border-l-2 border-cyan-400 w-6 h-6 rounded-bl-md"></span>
+                          {isScanning && (
+                            <div className="bg-slate-950/85 backdrop-blur-md px-3 py-1.5 rounded-xl border border-cyan-500/40 text-cyan-300 text-xs font-mono font-bold flex items-center gap-2 shadow-lg animate-pulse">
+                              <Loader className="w-3.5 h-3.5 animate-spin text-cyan-400" />
+                              <span>SCANNING ROAD SURFACE & CAVITY DEPTH...</span>
+                            </div>
+                          )}
+                          <span className="border-b-2 border-r-2 border-cyan-400 w-6 h-6 rounded-br-md"></span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* AI Verification Output Card — Generated after scanning completes */}
+                    {!isScanning && aiResult && (
+                      <div
+                        className={`p-4 border-t text-xs space-y-2 transition-all animate-fade-in-up ${
+                          aiResult.status === 'ACCEPTED'
+                            ? 'bg-emerald-950/90 border-emerald-500/40 text-emerald-200'
+                            : 'bg-rose-950/90 border-rose-500/40 text-rose-200'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold flex items-center gap-1.5 text-sm">
+                            {aiResult.status === 'ACCEPTED' ? (
+                              <>
+                                <CheckCircle2 className="w-4 h-4 text-emerald-400" />
+                                <span>REPORT ACCEPTED — Real Road Pothole</span>
+                              </>
+                            ) : (
+                              <>
+                                <XCircle className="w-4 h-4 text-rose-400" />
+                                <span>INVALID PHOTO — Not a Road Pothole</span>
+                              </>
+                            )}
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-mono font-bold text-[10px] border border-cyan-500/30">
+                            {aiResult.confidence}% AI Match
+                          </span>
+                        </div>
+
+                        <p className="text-slate-300 text-[11px] leading-relaxed">
+                          {aiResult.reason}
+                        </p>
+
+                        <div className="flex flex-wrap items-center justify-between pt-2 border-t border-white/10 text-[10px] text-slate-400">
+                          <span>Image Quality: <strong className="text-slate-200">{aiResult.imageQuality}</strong></span>
+                          <span>Detected Severity: <strong className="text-cyan-300">{aiResult.severity}</strong></span>
+                          <span>Verification Engine: <strong className="text-violet-300">{aiResult.analyzedBy}</strong></span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             </div>
-            <button type="submit" disabled={submitting || lat == null || lng == null} className="btn-primary w-full py-3 disabled:opacity-60">
-              {submitting ? 'Submitting...' : 'Submit Issue'}
+
+            {/* Submit Button right below photo card */}
+            <button
+              type="submit"
+              disabled={submitting || isScanning || !imageFile || aiResult?.status === 'REJECTED'}
+              className={`w-full py-3.5 text-sm font-extrabold shadow-xl rounded-xl transition cursor-pointer flex items-center justify-center gap-2 ${
+                aiResult?.status === 'REJECTED'
+                  ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 opacity-75 cursor-not-allowed'
+                  : 'btn-primary shadow-cyan-500/20 disabled:opacity-60 text-white'
+              }`}
+            >
+              <Sparkles className="w-5 h-5 text-cyan-300 animate-pulse" />
+              {submitting
+                ? 'Submitting Report to 6-Agent AI Engine...'
+                : aiResult?.status === 'REJECTED'
+                ? 'Upload a Valid Road Photo to Submit'
+                : '🚀 Submit One-Tap AI Report'}
             </button>
+
+            {/* 2. Location Address & Device GNSS Coordinates */}
+            <div className="space-y-2 pt-3 border-t border-white/10">
+              <label className="mb-1 flex items-center justify-between text-xs font-medium text-slate-400">
+                <span className="flex items-center gap-1">
+                  <MapPin className="h-4 w-4 text-violet-400" /> Location Address / Coordinates
+                </span>
+                <button
+                  type="button"
+                  onClick={refreshLocation}
+                  disabled={locationRefreshing}
+                  className="text-xs text-cyan-400 hover:text-cyan-300 disabled:opacity-50 transition flex items-center gap-1 cursor-pointer font-bold"
+                  title="Recapture GNSS device coordinates"
+                >
+                  {locationRefreshing ? (
+                    <>
+                      <Loader className="h-3 w-3 animate-spin" /> Acquiring GNSS...
+                    </>
+                  ) : (
+                    <>📡 Recapture Device GPS</>
+                  )}
+                </button>
+              </label>
+              <input
+                value={address}
+                onChange={(e) => setAddress(e.target.value)}
+                className="input-dark mb-2 text-xs"
+                placeholder="Street address or area coordinates (auto-captured)"
+              />
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <label className="text-[10px] text-slate-500 font-mono block mb-0.5">Latitude</label>
+                  <input
+                    type="number"
+                    step="0.000001"
+                    value={lat ?? ''}
+                    onChange={(e) => setLat(Number(e.target.value))}
+                    className="input-dark text-xs font-mono"
+                    placeholder="Latitude"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 font-mono block mb-0.5">Longitude</label>
+                  <input
+                    type="number"
+                    step="0.000001"
+                    value={lng ?? ''}
+                    onChange={(e) => setLng(Number(e.target.value))}
+                    className="input-dark text-xs font-mono"
+                    placeholder="Longitude"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 3. Optional Additional Details */}
+            <div className="space-y-3 pt-3 border-t border-white/10">
+              <div className="flex items-center justify-between text-xs font-bold text-slate-400">
+                <span>Additional Details (Optional)</span>
+                <span className="text-[10px] text-cyan-400 font-mono">AI will auto-generate if left blank</span>
+              </div>
+
+              {/* Optional Title */}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-400">Title <span className="text-slate-500">(Optional)</span></label>
+                <input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  onBlur={checkDuplicates}
+                  placeholder="Optional — AI will auto-generate title if left blank"
+                  className="input-dark text-xs"
+                />
+              </div>
+
+              {/* Optional Description */}
+              <div>
+                <label className="mb-1 block text-xs font-medium text-slate-400">Description <span className="text-slate-500">(Optional)</span></label>
+                <textarea
+                  rows={2}
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="Optional — AI will auto-generate description from vision analysis"
+                  className="input-dark text-xs resize-none"
+                />
+              </div>
+
+              {/* Severity Rating */}
+              <div>
+                <label className="mb-1 flex items-center justify-between text-xs font-medium text-slate-400">
+                  <span>Severity Rating: <strong className="text-cyan-400">{severity} / 5</strong></span>
+                  {aiResult?.severity && (
+                    <span className="text-[10px] font-mono text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                      AI Suggested: {aiResult.severity}
+                    </span>
+                  )}
+                </label>
+                <input
+                  type="range"
+                  min={1}
+                  max={5}
+                  value={severity}
+                  onChange={(e) => setSeverity(Number(e.target.value))}
+                  className="w-full accent-cyan-500 cursor-pointer"
+                />
+              </div>
+            </div>
           </div>
 
+          {/* Right Sidebar Details & Duplicates */}
           <div className="space-y-4">
             {duplicates.length > 0 && (
               <div className="animate-scale-in rounded-2xl border border-amber-500/30 bg-amber-500/10 p-5">
@@ -305,26 +660,50 @@ export function ReportIssue() {
                 </div>
                 <div className="mt-3 space-y-2">
                   {duplicates.map((d) => (
-                    <label key={d.id} className="flex cursor-pointer items-start gap-2 rounded-xl border border-amber-500/20 bg-white/5 p-3">
-                      <input type="radio" name="merge" checked={mergeWithId === d.id} onChange={() => setMergeWithId(d.id)} className="mt-1 accent-amber-500" />
+                    <label
+                      key={d.id}
+                      className="flex cursor-pointer items-start gap-2 rounded-xl border border-amber-500/20 bg-white/5 p-3"
+                    >
+                      <input
+                        type="radio"
+                        name="merge"
+                        checked={mergeWithId === d.id}
+                        onChange={() => setMergeWithId(d.id)}
+                        className="mt-1 accent-amber-500"
+                      />
                       <div>
                         <p className="font-medium text-slate-100">{d.title}</p>
-                        <p className="text-xs text-slate-500">{d.reportCount} reports · Priority {d.priorityScore}</p>
+                        <p className="text-xs text-slate-500">
+                          {d.reportCount} reports · Priority {d.priorityScore}
+                        </p>
                       </div>
                     </label>
                   ))}
                   <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-400">
-                    <input type="radio" name="merge" checked={mergeWithId === null} onChange={() => setMergeWithId(null)} className="accent-cyan-500" />
+                    <input
+                      type="radio"
+                      name="merge"
+                      checked={mergeWithId === null}
+                      onChange={() => setMergeWithId(null)}
+                      className="accent-cyan-500"
+                    />
                     This is a new issue
                   </label>
                 </div>
               </div>
             )}
-            <div className="glass-card p-5">
-              <h3 className="font-semibold text-slate-100">Priority scoring</h3>
-              <p className="mt-2 text-sm text-slate-400">
-                Your trust score is <span className="text-cyan-400">{user?.trustScore}%</span>. Priority is calculated server-side when you submit.
+
+            <div className="glass-card p-5 space-y-3">
+              <div className="flex items-center gap-2 text-slate-100 font-semibold text-sm">
+                <ShieldCheck className="w-5 h-5 text-cyan-400" />
+                <span>Transparent Computer Vision Verification</span>
+              </div>
+              <p className="text-xs text-slate-400 leading-relaxed">
+                When you upload a pothole photo, our computer-vision engine auto-verifies road surface features, depth, and clarity before logging the complaint for municipal repair tracking.
               </p>
+              <div className="pt-2 border-t border-white/5 text-xs text-slate-400">
+                Your trust score is <span className="text-cyan-400 font-bold">{user?.trustScore}%</span>.
+              </div>
             </div>
           </div>
         </form>
