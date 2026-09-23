@@ -39,20 +39,32 @@ export function useGeolocation() {
   }, [])
 
   const fallbackToIpOrCity = async (
-    resolve: (val: DetailedGeoState) => void,
+    safeResolve: (val: DetailedGeoState) => void,
     reason: string
   ) => {
     console.log('📍 GNSS location unavailable or timed out:', reason, '— acquiring IP/city fallback location...')
+
+    const defaultState: DetailedGeoState = {
+      lat: 25.578321,
+      lng: 91.893421,
+      accuracy: 2500,
+      altitude: null,
+      capturedAt: new Date().toISOString(),
+      loading: false,
+      error: null,
+      permissionState: 'unknown',
+    }
+
     if (typeof navigator !== 'undefined' && navigator.onLine) {
       try {
         const controller = new AbortController()
-        const timeoutId = setTimeout(() => controller.abort(), 2500)
+        const timeoutId = setTimeout(() => controller.abort(), 2000)
         const res = await fetch('https://ipapi.co/json/', { signal: controller.signal })
         clearTimeout(timeoutId)
         if (res.ok) {
           const data = await res.json()
           if (data.latitude && data.longitude) {
-            const newState: DetailedGeoState = {
+            safeResolve({
               lat: Number(data.latitude),
               lng: Number(data.longitude),
               accuracy: 1500,
@@ -61,44 +73,48 @@ export function useGeolocation() {
               loading: false,
               error: null,
               permissionState: 'granted',
-            }
-            setState(newState)
-            resolve(newState)
+            })
             return
           }
         }
       } catch {}
     }
 
-    // Default city fallback (Shillong: 25.578321, 91.893421)
-    const defaultState: DetailedGeoState = {
-      lat: 25.578321,
-      lng: 91.893421,
-      accuracy: 5000,
-      altitude: null,
-      capturedAt: new Date().toISOString(),
-      loading: false,
-      error: null,
-      permissionState: 'unknown',
-    }
-    setState(defaultState)
-    resolve(defaultState)
+    safeResolve(defaultState)
   }
 
   const captureDeviceGPS = useCallback((): Promise<DetailedGeoState> => {
     return new Promise((resolve) => {
+      let isResolved = false
+
+      const safeResolve = (newState: DetailedGeoState) => {
+        if (isResolved) return
+        isResolved = true
+        setState(newState)
+        resolve(newState)
+      }
+
       if (typeof navigator === 'undefined' || !navigator.geolocation) {
-        fallbackToIpOrCity(resolve, 'Geolocation hardware or API is unsupported on this device.')
+        fallbackToIpOrCity(safeResolve, 'Geolocation hardware or API is unsupported on this device.')
         return
       }
 
       setState((prev) => ({ ...prev, loading: true, error: null }))
 
-      const tryGetPosition = (options: PositionOptions, isFallback = false) => {
+      // Hard safety timer: If browser geolocation hangs or times out for > 3.0s, force instant fallback
+      const hardTimer = setTimeout(() => {
+        if (!isResolved) {
+          console.warn('⏱️ Hard 3.0s safety timer reached — forcing IP/city fallback location...')
+          fallbackToIpOrCity(safeResolve, 'Browser GNSS request timed out.')
+        }
+      }, 3000)
+
+      try {
         navigator.geolocation.getCurrentPosition(
           (pos) => {
+            clearTimeout(hardTimer)
             const timestamp = new Date().toISOString()
-            const newState: DetailedGeoState = {
+            safeResolve({
               lat: pos.coords.latitude,
               lng: pos.coords.longitude,
               accuracy: Math.round(pos.coords.accuracy),
@@ -107,33 +123,23 @@ export function useGeolocation() {
               loading: false,
               error: null,
               permissionState: 'granted',
-            }
-            setState(newState)
-            resolve(newState)
+            })
           },
           (err) => {
-            if (!isFallback && (err.code === err.TIMEOUT || err.code === err.POSITION_UNAVAILABLE)) {
-              console.warn('⚠️ High accuracy GPS request timed out or unavailable, trying network location fallback...')
-              tryGetPosition({ enableHighAccuracy: false, timeout: 4000, maximumAge: 60000 }, true)
-              return
-            }
-
-            let errorMsg = 'Unable to acquire device GPS signal.'
-            if (err.code === err.PERMISSION_DENIED) {
-              errorMsg = 'Location permission denied. Please grant location access in browser settings.'
-            } else if (err.code === err.POSITION_UNAVAILABLE) {
-              errorMsg = 'GPS signal unavailable. Move to an open area away from tall structures and retry.'
-            } else if (err.code === err.TIMEOUT) {
-              errorMsg = 'GPS location request timed out.'
-            }
-
-            fallbackToIpOrCity(resolve, errorMsg)
+            clearTimeout(hardTimer)
+            console.warn('⚠️ Browser geolocation error:', err.message)
+            fallbackToIpOrCity(safeResolve, err.message || 'GPS signal unavailable.')
           },
-          options
+          {
+            enableHighAccuracy: true,
+            timeout: 2500,
+            maximumAge: 10000,
+          }
         )
+      } catch (e: any) {
+        clearTimeout(hardTimer)
+        fallbackToIpOrCity(safeResolve, e?.message || 'Geolocation exception.')
       }
-
-      tryGetPosition({ enableHighAccuracy: true, timeout: 3500, maximumAge: 0 }, false)
     })
   }, [])
 

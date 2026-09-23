@@ -344,15 +344,29 @@ export function ReportIssue() {
         )}
 
         {geo.error && (
-          <div className="mt-3 p-3 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-300 text-xs flex items-center justify-between gap-2">
+          <div className="mt-3 p-3 rounded-xl border border-rose-500/30 bg-rose-500/10 text-rose-300 text-xs flex flex-wrap items-center justify-between gap-2">
             <span>⚠️ {geo.error}</span>
-            <button
-              type="button"
-              onClick={refreshLocation}
-              className="px-2.5 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 font-bold text-xs transition cursor-pointer"
-            >
-              📡 Retry GPS
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={refreshLocation}
+                className="px-2.5 py-1 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-200 font-bold text-xs transition cursor-pointer"
+              >
+                📡 Retry GPS
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setLat(25.578321)
+                  setLng(91.893421)
+                  setAddress('Shillong, Meghalaya')
+                  toast.info('Location Set', 'Using default city location (Shillong).')
+                }}
+                className="px-2.5 py-1 rounded bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 font-bold text-xs transition cursor-pointer"
+              >
+                📍 Use Shillong Location
+              </button>
+            </div>
           </div>
         )}
 
