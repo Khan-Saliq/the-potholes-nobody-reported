@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, User, MapPin, Wrench, ShieldCheck, AlertTriangle, Clock, HardHat, Trash2, Sparkles, CheckCircle2, XCircle } from 'lucide-react'
+import { ArrowLeft, User, MapPin, Wrench, AlertTriangle, Clock, HardHat, Trash2, Sparkles, CheckCircle2, XCircle } from 'lucide-react'
 import { Layout } from '../../components/layout/Layout'
 import { AnimatedPage } from '../../components/ui/AnimatedPage'
 import { PriorityBar } from '../../components/ui/PriorityBar'
@@ -466,149 +466,11 @@ export function AdminIssueDetail() {
               )
             })()}
 
-            {/* AI Repair Verification Results & Review Actions */}
+            {/* AI Repair Verification Review Actions */}
             {issue.verificationResult && (
-              <div className="glass-card p-6 space-y-5 border-cyan-500/30">
-                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-white/10 pb-4">
-                  <div>
-                    <h2 className="text-base font-bold text-cyan-300 flex items-center gap-2">
-                      <ShieldCheck className="h-5 w-5 text-cyan-400" />
-                      Multi-Signal Same-Pothole Verification Engine
-                    </h2>
-                    <p className="text-xs text-slate-400 mt-0.5">
-                      Analyzed via Gemini Vision AI + OpenCV ORB Landmarks & Perspective Alignment
-                    </p>
-                  </div>
-                  <span
-                    className={`rounded-full px-3.5 py-1.5 text-xs font-extrabold border shadow-lg ${
-                      issue.verificationResult.overallResult === 'VERIFIED'
-                        ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-emerald-950/50'
-                        : issue.verificationResult.overallResult === 'SUSPICIOUS'
-                        ? 'bg-rose-500/20 text-rose-300 border-rose-500/50 shadow-rose-950/50'
-                        : 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-amber-950/50'
-                    }`}
-                  >
-                    {issue.verificationResult.overallResult === 'VERIFIED'
-                      ? '🟢 REPAIR VERIFIED'
-                      : issue.verificationResult.overallResult === 'SUSPICIOUS'
-                      ? '🔴 SUSPICIOUS REPAIR SUBMISSION'
-                      : '🟡 NEEDS ADMIN REVIEW'}
-                  </span>
-                </div>
-
-                {/* 6 Structured Verification Signals Grid */}
-                <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
-                  {/* Signal 1: Location GPS */}
-                  <div className="rounded-xl bg-slate-900/80 p-3.5 border border-white/10 space-y-1">
-                    <span className="text-[0.7rem] uppercase tracking-wider font-bold text-slate-400">Location GPS</span>
-                    <div className="text-sm font-bold flex items-center gap-1.5">
-                      {issue.verificationResult.locationStatus === 'MATCH' ? (
-                        <span className="text-emerald-400">✓ MATCH</span>
-                      ) : issue.verificationResult.locationStatus === 'MISMATCH' ? (
-                        <span className="text-rose-400">✕ MISMATCH</span>
-                      ) : (
-                        <span className="text-amber-400">⚠️ UNAVAILABLE</span>
-                      )}
-                    </div>
-                    <p className="text-[0.68rem] text-slate-400 font-mono">
-                      {issue.verificationResult.locationDistanceMeters != null
-                        ? `Distance: ${issue.verificationResult.locationDistanceMeters}m`
-                        : issue.verificationResult.gpsDistanceMeters != null
-                        ? `Distance: ${issue.verificationResult.gpsDistanceMeters}m`
-                        : 'GPS metadata missing'}
-                    </p>
-                  </div>
-
-                  {/* Signal 2: Surroundings */}
-                  <div className="rounded-xl bg-slate-900/80 p-3.5 border border-white/10 space-y-1">
-                    <span className="text-[0.7rem] uppercase tracking-wider font-bold text-slate-400">Surroundings</span>
-                    <div className="text-sm font-bold flex items-center gap-1.5">
-                      {issue.verificationResult.surroundingsStatus === 'MATCH' ? (
-                        <span className="text-emerald-400">✓ MATCH</span>
-                      ) : issue.verificationResult.surroundingsStatus === 'PARTIAL MATCH' ? (
-                        <span className="text-amber-400">⚠ PARTIAL MATCH</span>
-                      ) : issue.verificationResult.surroundingsStatus === 'MISMATCH' ? (
-                        <span className="text-rose-400">✕ MISMATCH</span>
-                      ) : (
-                        <span className="text-slate-400">❓ UNCONFIRMED</span>
-                      )}
-                    </div>
-                    <p className="text-[0.68rem] text-slate-400 font-mono">
-                      Feature score: {issue.verificationResult.backgroundScore ?? 0}%
-                    </p>
-                  </div>
-
-                  {/* Signal 3: Camera View */}
-                  <div className="rounded-xl bg-slate-900/80 p-3.5 border border-white/10 space-y-1">
-                    <span className="text-[0.7rem] uppercase tracking-wider font-bold text-slate-400">Camera View</span>
-                    <div className="text-sm font-bold flex items-center gap-1.5">
-                      {issue.verificationResult.cameraViewStatus === 'MATCH' ? (
-                        <span className="text-emerald-400">✓ MATCH</span>
-                      ) : issue.verificationResult.cameraViewStatus === 'PARTIAL MATCH' ? (
-                        <span className="text-amber-400">⚠ PARTIAL MATCH</span>
-                      ) : issue.verificationResult.cameraViewStatus === 'MISMATCH' ? (
-                        <span className="text-rose-400">✕ MISMATCH</span>
-                      ) : (
-                        <span className="text-slate-400">❓ UNCONFIRMED</span>
-                      )}
-                    </div>
-                    <p className="text-[0.68rem] text-slate-400 font-mono">
-                      Perspective match: {issue.verificationResult.perspectiveScore ?? 0}%
-                    </p>
-                  </div>
-
-                  {/* Signal 4: Pothole Repair */}
-                  <div className="rounded-xl bg-slate-900/80 p-3.5 border border-white/10 space-y-1">
-                    <span className="text-[0.7rem] uppercase tracking-wider font-bold text-slate-400">Pothole Repair</span>
-                    <div className="text-sm font-bold flex items-center gap-1.5">
-                      {issue.verificationResult.potholeRepairStatus === 'CONFIRMED' ? (
-                        <span className="text-emerald-400">✓ CONFIRMED</span>
-                      ) : (
-                        <span className="text-rose-400">✕ NOT CONFIRMED</span>
-                      )}
-                    </div>
-                    <p className="text-[0.68rem] text-slate-400">Road patch verified</p>
-                  </div>
-
-                  {/* Signal 5: AI Analysis */}
-                  <div className="rounded-xl bg-slate-900/80 p-3.5 border border-white/10 space-y-1">
-                    <span className="text-[0.7rem] uppercase tracking-wider font-bold text-slate-400">AI Analysis</span>
-                    <div className="text-sm font-bold flex items-center gap-1.5">
-                      {issue.verificationResult.aiAnalysisStatus === 'VALID' ? (
-                        <span className="text-emerald-400">✓ VALID</span>
-                      ) : issue.verificationResult.aiAnalysisStatus === 'NEEDS REVIEW' ? (
-                        <span className="text-amber-400">⚠ NEEDS REVIEW</span>
-                      ) : (
-                        <span className="text-rose-400">✕ INVALID</span>
-                      )}
-                    </div>
-                    <p className="text-[0.68rem] text-slate-400">Gemini Vision AI</p>
-                  </div>
-
-                  {/* Signal 6: Overall Decision */}
-                  <div className="rounded-xl bg-slate-900/80 p-3.5 border border-white/10 space-y-1">
-                    <span className="text-[0.7rem] uppercase tracking-wider font-bold text-slate-400">Final Recommendation</span>
-                    <div className="text-xs font-bold text-cyan-300">
-                      {issue.verificationResult.overallResult || 'INCONCLUSIVE'}
-                    </div>
-                    <p className="text-[0.68rem] text-slate-400">Audit Status</p>
-                  </div>
-                </div>
-
-                {issue.verificationResult.reasons && (
-                  <div className="space-y-1.5 text-xs text-slate-300 bg-black/40 p-4 rounded-xl border border-white/10">
-                    <span className="font-bold text-cyan-200 block mb-1">Detailed Reason & Audit Logs:</span>
-                    {issue.verificationResult.reasons.map((r, idx) => (
-                      <p key={idx} className="flex items-start gap-2">
-                        <span className="text-cyan-400 font-bold">•</span>
-                        <span>{r}</span>
-                      </p>
-                    ))}
-                  </div>
-                )}
-
+              <div className="glass-card p-6 space-y-3 border-cyan-500/30">
                 {/* Admin Approval / Rejection Actions */}
-                <div className="pt-3 border-t border-white/10 space-y-3">
+                <div className="space-y-3">
                   <span className="text-xs font-semibold text-slate-200 block">Admin Manual Action Panel</span>
                   <input
                     type="text"
