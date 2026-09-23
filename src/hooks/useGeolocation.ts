@@ -58,57 +58,90 @@ export function useGeolocation() {
 
       setState((prev) => ({ ...prev, loading: true, error: null }))
 
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          const timestamp = new Date().toISOString()
-          const newState: DetailedGeoState = {
-            lat: pos.coords.latitude,
-            lng: pos.coords.longitude,
-            accuracy: Math.round(pos.coords.accuracy),
-            altitude: pos.coords.altitude != null ? Math.round(pos.coords.altitude) : null,
-            capturedAt: timestamp,
-            loading: false,
-            error: null,
-            permissionState: 'granted',
-          }
-          setState(newState)
-          resolve(newState)
-        },
-        (err) => {
-          let errorMsg = 'Unable to acquire device GPS signal.'
-          if (err.code === err.PERMISSION_DENIED) {
-            errorMsg = 'Location permission denied. Please grant location access in browser settings.'
-          } else if (err.code === err.POSITION_UNAVAILABLE) {
-            errorMsg = 'GPS signal unavailable. Move to an open area away from tall structures and retry.'
-          } else if (err.code === err.TIMEOUT) {
-            errorMsg = 'GPS location request timed out. Please tap "Retry GPS" in an open area.'
-          }
+      const tryGetPosition = (options: PositionOptions, isFallback = false) => {
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const timestamp = new Date().toISOString()
+            const newState: DetailedGeoState = {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+              accuracy: Math.round(pos.coords.accuracy),
+              altitude: pos.coords.altitude != null ? Math.round(pos.coords.altitude) : null,
+              capturedAt: timestamp,
+              loading: false,
+              error: null,
+              permissionState: 'granted',
+            }
+            setState(newState)
+            resolve(newState)
+          },
+          (err) => {
+            if (!isFallback && (err.code === err.TIMEOUT || err.code === err.POSITION_UNAVAILABLE)) {
+              console.warn('⚠️ High accuracy GPS request timed out or unavailable, trying network location fallback...')
+              tryGetPosition({ enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }, true)
+              return
+            }
 
-          const errState: DetailedGeoState = {
-            lat: null,
-            lng: null,
-            accuracy: null,
-            altitude: null,
-            capturedAt: null,
-            loading: false,
-            error: errorMsg,
-            permissionState: err.code === err.PERMISSION_DENIED ? 'denied' : 'granted',
-          }
-          setState(errState)
-          resolve(errState)
-        },
-        {
-          enableHighAccuracy: true,
-          timeout: 15000,
-          maximumAge: 0,
-        }
-      )
+            let errorMsg = 'Unable to acquire device GPS signal.'
+            if (err.code === err.PERMISSION_DENIED) {
+              errorMsg = 'Location permission denied. Please grant location access in browser settings.'
+            } else if (err.code === err.POSITION_UNAVAILABLE) {
+              errorMsg = 'GPS signal unavailable. Move to an open area away from tall structures and retry.'
+            } else if (err.code === err.TIMEOUT) {
+              errorMsg = 'GPS location request timed out. Please tap "Retry GPS" in an open area.'
+            }
+
+            const errState: DetailedGeoState = {
+              lat: null,
+              lng: null,
+              accuracy: null,
+              altitude: null,
+              capturedAt: null,
+              loading: false,
+              error: errorMsg,
+              permissionState: err.code === err.PERMISSION_DENIED ? 'denied' : 'granted',
+            }
+            setState(errState)
+            resolve(errState)
+          },
+          options
+        )
+      }
+
+      tryGetPosition({ enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }, false)
     })
   }, [])
 
   useEffect(() => {
     captureDeviceGPS()
   }, [captureDeviceGPS])
+
+  // Auto-retry location capture when coming back online or when window gains focus
+  useEffect(() => {
+    const handleOnline = () => {
+      console.log('🌐 Network came online — refreshing device geolocation...')
+      captureDeviceGPS()
+    }
+
+    const handleFocus = () => {
+      if (state.lat == null || state.error) {
+        console.log('🔍 Window focused & location missing — retrying device geolocation...')
+        captureDeviceGPS()
+      }
+    }
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', handleOnline)
+      window.addEventListener('focus', handleFocus)
+    }
+
+    return () => {
+      if (typeof window !== 'undefined') {
+        window.removeEventListener('online', handleOnline)
+        window.removeEventListener('focus', handleFocus)
+      }
+    }
+  }, [captureDeviceGPS, state.lat, state.error])
 
   return {
     ...state,

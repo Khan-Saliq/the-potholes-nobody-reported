@@ -5,6 +5,7 @@ import { Layout } from '../../components/layout/Layout'
 import { AnimatedPage } from '../../components/ui/AnimatedPage'
 import { useAuth } from '../../context/AuthContext'
 import { useToast } from '../../context/ToastContext'
+import { useOffline } from '../../context/OfflineContext'
 import { useGeolocation } from '../../hooks/useGeolocation'
 import {
   findDuplicateCandidates,
@@ -24,6 +25,7 @@ import type { Issue, IssueCategory } from '../../types'
 export function ReportIssue() {
   const { user } = useAuth()
   const { toast } = useToast()
+  const { isOnline } = useOffline()
   const geo = useGeolocation()
   const navigate = useNavigate()
 
@@ -55,17 +57,32 @@ export function ReportIssue() {
     if (geo.lat != null && geo.lng != null) {
       setLat(geo.lat)
       setLng(geo.lng)
-      if (!address || address === 'Detecting location...') {
-        if (navigator.onLine) {
-          getFormattedArea(geo.lat, geo.lng).then((area) => {
-            setAddress(area)
-          })
-        } else {
-          setAddress(`${geo.lat.toFixed(6)}, ${geo.lng.toFixed(6)}`)
+
+      const trimmedAddr = (address || '').trim()
+      const isRawCoordAddress =
+        !trimmedAddr ||
+        trimmedAddr === 'Detecting location...' ||
+        /^-?\d+\.\d+,\s*-?\d+\.\d+$/.test(trimmedAddr)
+
+      if (isOnline || navigator.onLine) {
+        if (isRawCoordAddress) {
+          getFormattedArea(geo.lat, geo.lng)
+            .then((area) => {
+              if (area) setAddress(area)
+            })
+            .catch(() => {})
         }
+        findDuplicateCandidates('pothole', geo.lat, geo.lng)
+          .then(setDuplicates)
+          .catch(() => {})
+      } else if (isRawCoordAddress) {
+        setAddress(`${geo.lat.toFixed(6)}, ${geo.lng.toFixed(6)}`)
       }
+    } else if ((isOnline || navigator.onLine) && (lat == null || lng == null || geo.error)) {
+      // Auto-retry acquiring device location when network is online
+      geo.refreshLocation()
     }
-  }, [geo.lat, geo.lng])
+  }, [geo.lat, geo.lng, isOnline])
 
   const checkDuplicates = async () => {
     if (lat != null && lng != null && navigator.onLine) {
