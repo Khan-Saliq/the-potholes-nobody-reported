@@ -37,9 +37,20 @@ export const IssueCard = memo(function IssueCard({
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <StatusBadge status={issue.status} />
-            <Badge variant={validationVariant[issue.validationResult]}>
-              {issue.validationResult}
-            </Badge>
+            {issue.validationResult &&
+              issue.validationResult !== 'valid' &&
+              issue.status !== 'completed' &&
+              issue.status !== 'resolved' && (
+                <Badge variant={validationVariant[issue.validationResult] || 'default'}>
+                  {issue.validationResult === 'pending'
+                    ? 'AI Verification Pending'
+                    : issue.validationResult === 'suspicious'
+                    ? 'AI Suspicious'
+                    : issue.validationResult === 'manipulated'
+                    ? 'AI Manipulated'
+                    : issue.validationResult}
+                </Badge>
+              )}
           </div>
           <h3 className="mt-2 text-lg font-semibold text-slate-100 transition-colors group-hover:text-cyan-300">
             {issue.title}

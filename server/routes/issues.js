@@ -1196,6 +1196,7 @@ router.post('/:id/review-repair', authRequired, requireAnyAdmin, async (req, res
 
     if (action === 'approve') {
       issue.status = 'completed'
+      issue.validationResult = 'valid'
     } else {
       issue.status = 'rejected'
     }
